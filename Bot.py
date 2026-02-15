@@ -29,7 +29,7 @@ import yt_dlp
 #    - Ao terminar tema/kokusen, a faixa interrompida volta para o início da fila.
 #
 # 4) Observação técnica:
-#    - Token do bot está hardcoded no final do arquivo (ideal migrar para variável de ambiente).
+#    - Token do bot deve ser fornecido por variável de ambiente (`DISCORD_BOT_TOKEN`).
 # -----------------------------------------------------------------------------
 
 # Mapeamento dos resultados dos dados Fate para símbolos visuais.
@@ -977,5 +977,9 @@ async def on_message(message):
         await canal_destino.send('https://tenor.com/view/furry-fursuit-lua-excited-discord-gif-25290457')
         await canal_destino.send(f'Jandei foi citado! "{message.content}". lembrando que Jandei é um furry <@332954449918165003>')
 
-    # Inicialização do bot (token atualmente fixo no arquivo).
-client.run("Token do bot aqui")
+    # Inicialização do bot com token via variável de ambiente.
+token_bot = os.environ.get('DISCORD_BOT_TOKEN', '').strip()
+if not token_bot:
+    raise RuntimeError('Defina a variável de ambiente DISCORD_BOT_TOKEN antes de iniciar o bot.')
+
+client.run(token_bot)
