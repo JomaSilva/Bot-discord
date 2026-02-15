@@ -7,6 +7,7 @@ import ast
 import os
 import glob
 import asyncio
+import shutil
 import yt_dlp
 
 # -----------------------------------------------------------------------------
@@ -400,8 +401,27 @@ async def tocar_audio_ao_mais_quatro(usuario, canal_texto, acao_fate):
 
 def _extrair_itens_playlist(url):
     # Extrai URLs das faixas de uma playlist usando yt-dlp.
+    class _YDLLogger:
+        @staticmethod
+        def debug(msg):
+            return
+
+        @staticmethod
+        def warning(msg):
+            if 'No supported JavaScript runtime could be found' in msg:
+                return
+            print(f'[yt-dlp] {msg}')
+
+        @staticmethod
+        def error(msg):
+            print(f'[yt-dlp] {msg}')
+
+    player_client = ['android', 'web'] if shutil.which('node') else ['web']
     ydl_opts = {
         'quiet': True,
+        'no_warnings': True,
+        'logger': _YDLLogger(),
+        'extractor_args': {'youtube': {'player_client': player_client}},
         'extract_flat': True,
         'skip_download': True,
         'noplaylist': False,
@@ -422,8 +442,27 @@ def _extrair_itens_playlist(url):
 
 def _extrair_stream_audio(url):
     # Extrai URL direta de stream de áudio para reprodução no Discord.
+    class _YDLLogger:
+        @staticmethod
+        def debug(msg):
+            return
+
+        @staticmethod
+        def warning(msg):
+            if 'No supported JavaScript runtime could be found' in msg:
+                return
+            print(f'[yt-dlp] {msg}')
+
+        @staticmethod
+        def error(msg):
+            print(f'[yt-dlp] {msg}')
+
+    player_client = ['android', 'web'] if shutil.which('node') else ['web']
     ydl_opts = {
         'quiet': True,
+        'no_warnings': True,
+        'logger': _YDLLogger(),
+        'extractor_args': {'youtube': {'player_client': player_client}},
         'format': 'bestaudio/best',
         'noplaylist': True,
     }
@@ -939,4 +978,4 @@ async def on_message(message):
         await canal_destino.send(f'Jandei foi citado! "{message.content}". lembrando que Jandei é um furry <@332954449918165003>')
 
     # Inicialização do bot (token atualmente fixo no arquivo).
-client.run("Token")
+client.run("Token do bot aqui")
