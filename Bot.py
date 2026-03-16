@@ -49,7 +49,7 @@ tree = app_commands.CommandTree(client)
 comandos_sincronizados = False
 
 # URL fixa da playlist do comando !luta.
-luta_playlist_url = 'https://music.youtube.com/playlist?list=PLIEibbGcfrARrAaNARQmPHAT-HwUa8-d8&si=U26AUy2dPYp3gq_C'
+luta_playlist_url = 'https://music.youtube.com/playlist?list=PLWJ_MRpZU6ocB4WUwm30W3gS5GnnkaG9n&si=BHeX7STFUBXr1SSm'
 
 # Estado de áudio por servidor (guild) para controle da playlist.
 filas_luta = {}
