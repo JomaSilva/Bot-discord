@@ -83,6 +83,34 @@ def preparar_interrupcao_playlist(guild_id, voice_client):
     return False
 
 
+async def conectar_ao_canal_voz(guild, canal_voz):
+    # Centraliza a conexão de voz para aplicar timeout/reconnect e mensagens mais úteis.
+    if guild is None:
+        raise RuntimeError('Guild inválida para conexão de voz.')
+
+    voice_client = guild.voice_client
+    try:
+        if voice_client is None:
+            return await canal_voz.connect(timeout=30.0, reconnect=True, self_deaf=True)
+
+        if voice_client.channel != canal_voz:
+            await voice_client.move_to(canal_voz)
+
+        return voice_client
+    except asyncio.TimeoutError as erro:
+        raise RuntimeError(
+            'Tempo esgotado ao conectar no canal de voz. Isso normalmente indica bloqueio de rede, firewall ou problema temporário do endpoint de voz do Discord.'
+        ) from erro
+    except discord.ClientException as erro:
+        raise RuntimeError(f'Falha do cliente de voz do Discord: {erro}') from erro
+    except Exception as erro:
+        if getattr(erro, 'code', None) == 4017:
+            raise RuntimeError(
+                'O Discord exigiu o protocolo de voz E2EE/DAVE neste canal (código 4017). A biblioteca atual do bot não suporta esse protocolo, então a conexão de voz não pode ser concluída aqui.'
+            ) from erro
+        raise RuntimeError(f'Falha ao estabelecer conexão de voz: {erro}') from erro
+
+
 async def retomar_playlist_interrompida(guild_id, canal_texto):
     # Retoma a faixa interrompida após o término do tema/kokusen.
     # Remove estado temporário de retomada; se não houver nada salvo, não faz nada.
@@ -304,10 +332,7 @@ async def tocar_kokusen_no_voz(usuario, canal_texto):
         # Se a playlist estiver tocando, prepara retomada depois que o kokusen terminar.
         interrompeu_playlist = preparar_interrupcao_playlist(guild.id, voice_client)
 
-        if voice_client is None:
-            voice_client = await canal_voz.connect()
-        elif voice_client.channel != canal_voz:
-            await voice_client.move_to(canal_voz)
+        voice_client = await conectar_ao_canal_voz(guild, canal_voz)
 
         caminho_audio = os.path.join(os.path.dirname(__file__), 'kokusen.ogg')
         if not os.path.isfile(caminho_audio):
@@ -355,10 +380,7 @@ async def tocar_audio_url_no_voz(usuario, canal_texto, audio_url):
         # Mesmo comportamento do kokusen: interrompe e agenda retomada da playlist.
         interrompeu_playlist = preparar_interrupcao_playlist(guild.id, voice_client)
 
-        if voice_client is None:
-            voice_client = await canal_voz.connect()
-        elif voice_client.channel != canal_voz:
-            await voice_client.move_to(canal_voz)
+        voice_client = await conectar_ao_canal_voz(guild, canal_voz)
 
         stream_url, _titulo = await asyncio.to_thread(_extrair_stream_audio, audio_url)
         if not stream_url:
@@ -753,10 +775,7 @@ async def on_message(message):
         voice_client = message.guild.voice_client if message.guild else None
 
         try:
-            if voice_client is None:
-                voice_client = await canal_voz.connect()
-            elif voice_client.channel != canal_voz:
-                await voice_client.move_to(canal_voz)
+            voice_client = await conectar_ao_canal_voz(message.guild, canal_voz)
 
             itens_playlist = await asyncio.to_thread(_extrair_itens_playlist, luta_playlist_url)
             if not itens_playlist:
@@ -773,6 +792,7 @@ async def on_message(message):
             await message.channel.send(f'Playlist de luta carregada com **{len(itens_playlist)}** faixas.')
             await tocar_proxima_da_fila(message.guild.id, message.channel)
         except Exception as erro:
+            print(f'Erro detalhado em !luta: {erro}')
             await message.channel.send(f'Falha no comando `!luta`: `{erro}`')
         return
 

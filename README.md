@@ -19,7 +19,7 @@ Bot para Discord com:
 
 Dependências atuais:
 
-- `discord.py>=2.3.2`
+- `discord.py[voice]>=2.7.1`
 - `PyNaCl>=1.5.0`
 - `yt-dlp>=2024.12.13`
 
