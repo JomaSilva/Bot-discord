@@ -14,7 +14,7 @@ import yt_dlp
 # VISÃO GERAL DO BOT (handoff para outro dev)
 #
 # 1) Entradas suportadas:
-#    - Comandos de texto: !luta, !tema, !ban, !desbanir, !adm, !teste
+#    - Comandos de texto: !luta, !tocar, !skipar, !tema, !ban, !desbanir, !adm, !teste
 #    - Comandos slash: /roll, /tema, /ban, /desbanir
 #    - Mensagens de rolagem: dN e df (ex.: d20+3, 4df atacar)
 #
@@ -56,6 +56,10 @@ filas_luta = {}
 faixa_atual_luta = {}
 retomar_faixa_luta = {}
 interromper_auto_avanco_luta = set()
+filas_avulsas = {}
+faixa_atual_avulsa = {}
+modo_reproducao = {}
+canal_texto_reproducao = {}
 
 # Tema personalizado de cada usuário para ativação no ++++.
 temas_usuario = {}
@@ -67,6 +71,15 @@ def cancelar_playlist_luta(guild_id):
     faixa_atual_luta.pop(guild_id, None)
     retomar_faixa_luta.pop(guild_id, None)
     interromper_auto_avanco_luta.discard(guild_id)
+
+
+def cancelar_fila_avulsa(guild_id):
+    # Limpa completamente a fila temporária de músicas avulsas para uma guild.
+    filas_avulsas.pop(guild_id, None)
+    faixa_atual_avulsa.pop(guild_id, None)
+    if modo_reproducao.get(guild_id) == 'avulsa':
+        modo_reproducao.pop(guild_id, None)
+    canal_texto_reproducao.pop(guild_id, None)
 
 
 def preparar_interrupcao_playlist(guild_id, voice_client):
@@ -131,6 +144,66 @@ async def retomar_playlist_interrompida(guild_id, canal_texto):
         return
 
     await tocar_proxima_da_fila(guild_id, canal_texto)
+
+
+async def tocar_proxima_da_fila_avulsa(guild_id, canal_texto):
+    # Toca a próxima faixa da fila temporária e, ao terminar, retoma !luta se houver interrupção pendente.
+    fila = filas_avulsas.get(guild_id)
+    if not fila:
+        faixa_atual_avulsa.pop(guild_id, None)
+        modo_reproducao.pop(guild_id, None)
+        if retomar_faixa_luta.get(guild_id):
+            await retomar_playlist_interrompida(guild_id, canal_texto)
+        return
+
+    voice_client = canal_texto.guild.voice_client
+    if voice_client is None or voice_client.is_playing():
+        return
+
+    proxima_url = fila.pop(0)
+    faixa_atual_avulsa[guild_id] = proxima_url
+    modo_reproducao[guild_id] = 'avulsa'
+    canal_texto_reproducao[guild_id] = canal_texto
+
+    try:
+        stream_url, titulo = await asyncio.to_thread(_extrair_stream_audio, proxima_url)
+        if not stream_url:
+            await canal_texto.send('Não consegui obter o áudio da música solicitada.')
+            faixa_atual_avulsa.pop(guild_id, None)
+            if fila:
+                await tocar_proxima_da_fila_avulsa(guild_id, canal_texto)
+            elif retomar_faixa_luta.get(guild_id):
+                await retomar_playlist_interrompida(guild_id, canal_texto)
+            return
+
+        def ao_terminar(erro):
+            if erro:
+                print(f'Erro ao tocar música avulsa: {erro}')
+            faixa_atual_avulsa.pop(guild_id, None)
+            if filas_avulsas.get(guild_id):
+                client.loop.call_soon_threadsafe(asyncio.create_task, tocar_proxima_da_fila_avulsa(guild_id, canal_texto))
+                return
+            modo_reproducao.pop(guild_id, None)
+            if retomar_faixa_luta.get(guild_id):
+                client.loop.call_soon_threadsafe(asyncio.create_task, retomar_playlist_interrompida(guild_id, canal_texto))
+
+        voice_client.play(
+            discord.FFmpegPCMAudio(
+                stream_url,
+                executable=obter_ffmpeg_executavel(),
+                before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+                options='-vn'
+            ),
+            after=ao_terminar
+        )
+        await canal_texto.send(f'Tocando agora: **{titulo}**')
+    except Exception as erro:
+        await canal_texto.send(f'Falha ao tocar música solicitada: `{erro}`')
+        faixa_atual_avulsa.pop(guild_id, None)
+        if filas_avulsas.get(guild_id) and not voice_client.is_playing():
+            await tocar_proxima_da_fila_avulsa(guild_id, canal_texto)
+        elif retomar_faixa_luta.get(guild_id):
+            await retomar_playlist_interrompida(guild_id, canal_texto)
 
 
 def obter_ffmpeg_executavel():
@@ -513,6 +586,8 @@ async def tocar_proxima_da_fila(guild_id, canal_texto):
     proxima_url = fila.pop(0)
     # Guarda referência da faixa atual para permitir retomada após interrupção.
     faixa_atual_luta[guild_id] = proxima_url
+    modo_reproducao[guild_id] = 'luta'
+    canal_texto_reproducao[guild_id] = canal_texto
     try:
         stream_url, titulo = await asyncio.to_thread(_extrair_stream_audio, proxima_url)
         if not stream_url:
@@ -529,6 +604,7 @@ async def tocar_proxima_da_fila(guild_id, canal_texto):
             if guild_id in interromper_auto_avanco_luta:
                 return
             faixa_atual_luta.pop(guild_id, None)
+            modo_reproducao.pop(guild_id, None)
             if filas_luta.get(guild_id):
                 client.loop.call_soon_threadsafe(asyncio.create_task, tocar_proxima_da_fila(guild_id, canal_texto))
 
@@ -545,6 +621,7 @@ async def tocar_proxima_da_fila(guild_id, canal_texto):
     except Exception as erro:
         await canal_texto.send(f'Falha ao tocar faixa da playlist: `{erro}`')
         faixa_atual_luta.pop(guild_id, None)
+        modo_reproducao.pop(guild_id, None)
         if filas_luta.get(guild_id) and not voice_client.is_playing():
             await tocar_proxima_da_fila(guild_id, canal_texto)
 
@@ -747,6 +824,8 @@ async def on_message(message):
     comando_teste = re.match(r'^!teste(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_adm = re.match(r'^!adm(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_luta = re.match(r'^!luta\s*$', message.content, re.IGNORECASE)
+    comando_tocar = re.match(r'^!tocar(?:\s+(.*))?$', message.content, re.IGNORECASE)
+    comando_skipar = re.match(r'^!skipar\s*$', message.content, re.IGNORECASE)
     comando_tema = re.match(r'^!tema(?:\s+(.*))?$', message.content, re.IGNORECASE)
 
     # !tema: salva tema personalizado por usuário.
@@ -758,6 +837,80 @@ async def on_message(message):
 
         temas_usuario[usuario.id] = link_tema
         await message.channel.send(f'{usuario.mention} tema salvo! Vou tocar no seu ++++ em 4df.')
+        return
+
+    # !tocar: adiciona uma música em uma fila temporária e retoma !luta quando a fila acabar.
+    if comando_tocar:
+        link_audio = (comando_tocar.group(1) or '').strip()
+        if not link_audio or not re.match(r'^https?://', link_audio, re.IGNORECASE):
+            await message.channel.send(f'{usuario.mention} use `!tocar <link>` com URL válida.')
+            return
+
+        if not isinstance(usuario, discord.Member):
+            membro = message.guild.get_member(usuario.id) if message.guild else None
+        else:
+            membro = usuario
+
+        if membro is None or membro.voice is None or membro.voice.channel is None:
+            await message.channel.send(f'{usuario.mention} entre em um canal de voz para usar `!tocar`.')
+            return
+
+        canal_voz = membro.voice.channel
+
+        try:
+            voice_client = await conectar_ao_canal_voz(message.guild, canal_voz)
+            fila_avulsa = filas_avulsas.setdefault(message.guild.id, [])
+            fila_avulsa.append(link_audio)
+            canal_texto_reproducao[message.guild.id] = message.channel
+
+            modo_atual = modo_reproducao.get(message.guild.id)
+            if modo_atual == 'luta':
+                preparar_interrupcao_playlist(message.guild.id, voice_client)
+
+            if voice_client.is_playing():
+                if modo_atual != 'avulsa':
+                    voice_client.stop()
+                    await asyncio.sleep(0)
+                    await tocar_proxima_da_fila_avulsa(message.guild.id, message.channel)
+                    await message.channel.send('Fila temporária iniciada. A playlist atual será retomada quando ela acabar.')
+                else:
+                    await message.channel.send(f'Música adicionada à fila temporária. Posição: **{len(fila_avulsa)}**.')
+                return
+
+            await tocar_proxima_da_fila_avulsa(message.guild.id, message.channel)
+        except Exception as erro:
+            await message.channel.send(f'Falha no comando `!tocar`: `{erro}`')
+        return
+
+    # !skipar: pula para a próxima música da fila ativa (playlist fixa ou fila temporária).
+    if comando_skipar:
+        guild = message.guild
+        if guild is None:
+            return
+
+        voice_client = guild.voice_client
+        if voice_client is None:
+            await message.channel.send('Não há reprodução ativa para pular.')
+            return
+
+        modo_atual = modo_reproducao.get(guild.id)
+        if voice_client.is_playing():
+            voice_client.stop()
+            if modo_atual == 'avulsa':
+                await message.channel.send('Pulando para a próxima música da fila temporária.')
+            else:
+                await message.channel.send('Pulando para a próxima música da playlist.')
+            return
+
+        if modo_atual == 'avulsa' and filas_avulsas.get(guild.id):
+            await tocar_proxima_da_fila_avulsa(guild.id, message.channel)
+            return
+
+        if filas_luta.get(guild.id):
+            await tocar_proxima_da_fila(guild.id, message.channel)
+            return
+
+        await message.channel.send('Não há próxima música para tocar agora.')
         return
 
     # !luta: carrega playlist fixa e inicia fila no canal de voz do usuário.
