@@ -14,7 +14,7 @@ import yt_dlp
 # VISÃO GERAL DO BOT (handoff para outro dev)
 #
 # 1) Entradas suportadas:
-#    - Comandos de texto: !luta, !tocar, !skipar, !tema, !ban, !desbanir, !adm, !teste
+#    - Comandos de texto: !luta, !tocar, !skipar, !parar, !tema, !ban, !desbanir, !adm, !teste
 #    - Comandos slash: /roll, /tema, /ban, /desbanir
 #    - Mensagens de rolagem: dN e df (ex.: d20+3, 4df atacar)
 #
@@ -79,6 +79,14 @@ def cancelar_fila_avulsa(guild_id):
     faixa_atual_avulsa.pop(guild_id, None)
     if modo_reproducao.get(guild_id) == 'avulsa':
         modo_reproducao.pop(guild_id, None)
+    canal_texto_reproducao.pop(guild_id, None)
+
+
+def resetar_estado_audio(guild_id):
+    # Reseta todo o estado de áudio da guild, incluindo fila fixa, fila temporária e retomadas.
+    cancelar_playlist_luta(guild_id)
+    cancelar_fila_avulsa(guild_id)
+    modo_reproducao.pop(guild_id, None)
     canal_texto_reproducao.pop(guild_id, None)
 
 
@@ -826,6 +834,7 @@ async def on_message(message):
     comando_luta = re.match(r'^!luta\s*$', message.content, re.IGNORECASE)
     comando_tocar = re.match(r'^!tocar(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_skipar = re.match(r'^!skipar\s*$', message.content, re.IGNORECASE)
+    comando_parar = re.match(r'^!parar\s*$', message.content, re.IGNORECASE)
     comando_tema = re.match(r'^!tema(?:\s+(.*))?$', message.content, re.IGNORECASE)
 
     # !tema: salva tema personalizado por usuário.
@@ -837,6 +846,36 @@ async def on_message(message):
 
         temas_usuario[usuario.id] = link_tema
         await message.channel.send(f'{usuario.mention} tema salvo! Vou tocar no seu ++++ em 4df.')
+        return
+
+    # !parar: interrompe qualquer reprodução ativa e limpa todo o estado de áudio da guild.
+    if comando_parar:
+        guild = message.guild
+        if guild is None:
+            return
+
+        voice_client = guild.voice_client
+        tinha_estado = any([
+            filas_luta.get(guild.id),
+            filas_avulsas.get(guild.id),
+            faixa_atual_luta.get(guild.id),
+            faixa_atual_avulsa.get(guild.id),
+            retomar_faixa_luta.get(guild.id),
+            modo_reproducao.get(guild.id),
+            voice_client is not None and (voice_client.is_playing() or voice_client.is_paused()),
+        ])
+
+        resetar_estado_audio(guild.id)
+
+        if voice_client is not None:
+            if voice_client.is_playing() or voice_client.is_paused():
+                voice_client.stop()
+            await voice_client.disconnect(force=False)
+
+        if tinha_estado:
+            await message.channel.send('Reprodução encerrada e estado de áudio resetado.')
+        else:
+            await message.channel.send('Não havia música ou playlist ativa para parar.')
         return
 
     # !tocar: adiciona uma música em uma fila temporária e retoma !luta quando a fila acabar.
