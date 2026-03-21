@@ -873,7 +873,7 @@ async def on_message(message):
             await voice_client.disconnect(force=False)
 
         if tinha_estado:
-            await message.channel.send('Reprodução encerrada e estado de áudio resetado.')
+            await message.channel.send('Reprodução encerrada.')
         else:
             await message.channel.send('Não havia música ou playlist ativa para parar.')
         return
