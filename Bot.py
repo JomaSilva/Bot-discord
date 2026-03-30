@@ -5,9 +5,13 @@ import random
 import re
 import ast
 import os
+import ssl
 import glob
 import asyncio
 import shutil
+from typing import Any, cast
+import aiohttp.connector
+import certifi
 import yt_dlp
 
 # -----------------------------------------------------------------------------
@@ -42,6 +46,10 @@ id_jandei = 332954449918165003
 ids_admin = [316323635470270475]
 
 # Configuração base do cliente Discord e comandos slash.
+# No macOS, algumas instalações novas de Python não expõem uma cadeia CA confiável ao aiohttp.
+_ssl_context_verificado = ssl.create_default_context(cafile=certifi.where())
+_ssl_context_verificado.set_alpn_protocols(("http/1.1",))
+aiohttp.connector._SSL_CONTEXT_VERIFIED = _ssl_context_verificado
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
@@ -215,24 +223,44 @@ async def tocar_proxima_da_fila_avulsa(guild_id, canal_texto):
 
 
 def obter_ffmpeg_executavel():
-    # Busca o executável do ffmpeg em caminhos comuns do Windows.
-    local_app_data = os.environ.get('LOCALAPPDATA', '')
-    padrao_winget = os.path.join(
-        local_app_data,
-        'Microsoft', 'WinGet', 'Packages',
-        'Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe',
-        'ffmpeg-*-full_build', 'bin', 'ffmpeg.exe'
-    )
-    caminhos_winget = sorted(glob.glob(padrao_winget), reverse=True)
-    caminhos = caminhos_winget + [
-        os.path.join(local_app_data, 'Microsoft', 'WinGet', 'Links', 'ffmpeg.exe'),
-        r'C:\Program Files\FFmpeg\bin\ffmpeg.exe',
-        r'C:\Program Files\ffmpeg\bin\ffmpeg.exe',
+    # Busca o executável do ffmpeg por variável de ambiente, PATH e caminhos comuns do sistema.
+    for nome_variavel in ('FFMPEG_EXECUTABLE', 'FFMPEG_PATH'):
+        caminho_configurado = os.environ.get(nome_variavel, '').strip()
+        if caminho_configurado and os.path.isfile(caminho_configurado):
+            return caminho_configurado
+
+    caminho_no_path = shutil.which('ffmpeg')
+    if caminho_no_path:
+        return caminho_no_path
+
+    caminhos = [
+        '/opt/homebrew/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        '/usr/bin/ffmpeg',
     ]
+
+    if os.name == 'nt':
+        local_app_data = os.environ.get('LOCALAPPDATA', '')
+        padrao_winget = os.path.join(
+            local_app_data,
+            'Microsoft', 'WinGet', 'Packages',
+            'Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe',
+            'ffmpeg-*-full_build', 'bin', 'ffmpeg.exe'
+        )
+        caminhos_winget = sorted(glob.glob(padrao_winget), reverse=True)
+        caminhos = caminhos_winget + [
+            os.path.join(local_app_data, 'Microsoft', 'WinGet', 'Links', 'ffmpeg.exe'),
+            r'C:\Program Files\FFmpeg\bin\ffmpeg.exe',
+            r'C:\Program Files\ffmpeg\bin\ffmpeg.exe',
+        ] + caminhos
+
     for caminho in caminhos:
         if caminho and os.path.isfile(caminho):
             return caminho
-    return 'ffmpeg'
+
+    raise RuntimeError(
+        'FFmpeg não encontrado. Instale o FFmpeg no sistema e garanta que ele esteja no PATH ou defina FFMPEG_EXECUTABLE com o caminho completo do binário.'
+    )
 
 
 def calcular_expressao(expr):
@@ -529,7 +557,7 @@ def _extrair_itens_playlist(url):
         'skip_download': True,
         'noplaylist': False,
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    with yt_dlp.YoutubeDL(cast(Any, ydl_opts)) as ydl:
         info = ydl.extract_info(url, download=False)
 
     entradas = []
@@ -569,7 +597,7 @@ def _extrair_stream_audio(url):
         'format': 'bestaudio/best',
         'noplaylist': True,
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    with yt_dlp.YoutubeDL(cast(Any, ydl_opts)) as ydl:
         info = ydl.extract_info(url, download=False)
     return info.get('url'), info.get('title', 'Faixa')
 
@@ -780,7 +808,7 @@ async def tema_slash(interaction: discord.Interaction, link: str):
 
 @tree.command(name='ban', description='(Admin) Adiciona usuário na lista de banidos')
 @app_commands.describe(usuario='Mencione o usuário para banir', usuario_id='Ou informe o ID do usuário')
-async def ban_slash(interaction: discord.Interaction, usuario: discord.User = None, usuario_id: str = None):
+async def ban_slash(interaction: discord.Interaction, usuario: discord.User | None = None, usuario_id: str | None = None):
     # Comando /ban (admin): adiciona usuário na lista de banidos.
     if not eh_admin(interaction.user.id):
         await interaction.response.send_message('Você não tem permissão para usar este comando.', ephemeral=True)
@@ -801,7 +829,7 @@ async def ban_slash(interaction: discord.Interaction, usuario: discord.User = No
 
 @tree.command(name='desbanir', description='(Admin) Remove usuário da lista de banidos')
 @app_commands.describe(usuario='Mencione o usuário para desbanir', usuario_id='Ou informe o ID do usuário')
-async def desbanir_slash(interaction: discord.Interaction, usuario: discord.User = None, usuario_id: str = None):
+async def desbanir_slash(interaction: discord.Interaction, usuario: discord.User | None = None, usuario_id: str | None = None):
     # Comando /desbanir (admin): remove usuário da lista de banidos.
     if not eh_admin(interaction.user.id):
         await interaction.response.send_message('Você não tem permissão para usar este comando.', ephemeral=True)
@@ -1186,8 +1214,11 @@ async def on_message(message):
             except Exception:
                 canal_destino = message.channel
 
-        await canal_destino.send('https://tenor.com/view/furry-fursuit-lua-excited-discord-gif-25290457')
-        await canal_destino.send(f'Jandei foi citado! "{message.content}". lembrando que Jandei é um furry <@332954449918165003>')
+        canal_envio = canal_destino if canal_destino is not None and hasattr(canal_destino, 'send') else message.channel
+        canal_envio = cast(Any, canal_envio)
+
+        await canal_envio.send('https://tenor.com/view/furry-fursuit-lua-excited-discord-gif-25290457')
+        await canal_envio.send(f'Jandei foi citado! "{message.content}". lembrando que Jandei é um furry <@332954449918165003>')
 
     # Inicialização do bot com token via variável de ambiente.
 token_bot = os.environ.get('DISCORD_BOT_TOKEN', '').strip()

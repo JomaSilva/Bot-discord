@@ -22,6 +22,8 @@ Dependências atuais:
 - `discord.py[voice]>=2.7.1`
 - `PyNaCl>=1.5.0`
 - `yt-dlp>=2024.12.13`
+- `ffmpeg-python>=0.2.0`
+- `certifi>=2024.12.14`
 
 ---
 
@@ -38,6 +40,8 @@ pip install -r requirements.txt
 ## Configuração do token
 
 O bot lê o token pela variável de ambiente `DISCORD_BOT_TOKEN`.
+
+No macOS, o projeto também configura automaticamente o CA bundle do `certifi` para evitar falhas de SSL em instalações do Python que não trazem a cadeia de certificados corretamente.
 
 ### PowerShell (Windows)
 
