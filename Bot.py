@@ -368,6 +368,31 @@ def processar_expressao_com_dados(conteudo, usuario_mention, prefixo='r '):
     return [mensagem]
 
 
+def eh_expressao_aditiva_de_dados(conteudo):
+    # Detecta expressões formadas apenas por dados, inteiros e operadores +/-, sem exigir prefixo `r`.
+    texto_limpo = conteudo.strip()
+    if not texto_limpo:
+        return False
+
+    match_expressao = re.fullmatch(
+        r'[+-]?\s*(?:\d*d(?:f|\d+)|\d+)(?:\s*[+-]\s*(?:\d*d(?:f|\d+)|\d+))*\s*',
+        texto_limpo,
+        re.IGNORECASE
+    )
+    if not match_expressao:
+        return False
+
+    return re.search(r'\d*d(?:f|\d+)', texto_limpo, re.IGNORECASE) is not None
+
+
+def eh_rolagem_simples(conteudo):
+    # Detecta rolagens legadas de um único bloco, como `d20+5` ou `4df atacar`.
+    return bool(
+        re.match(r'^(\d*)d(\d+)((?:\s*[+-]\s*\d+)*)(?:\s+(.*))?$', conteudo, re.IGNORECASE)
+        or re.match(r'^(\d*)df((?:\s*[+-]\s*\d+)*)(?:\s+(.*))?$', conteudo, re.IGNORECASE)
+    )
+
+
 def extrair_metadados_rolagem(conteudo, mensagens):
     # Identifica se a rolagem simples permite efeitos especiais como o áudio do ++++.
     match_fate = re.match(r'^(\d*)df((?:\s*[+-]\s*\d+)*)(?:\s+(.*))?$', conteudo.strip(), re.IGNORECASE)
@@ -381,7 +406,7 @@ def extrair_metadados_rolagem(conteudo, mensagens):
     }
 
 
-def processar_entrada_rolagem(conteudo, usuario_id, usuario_mention, prefixo='r '):
+def processar_entrada_rolagem(conteudo, usuario_id, usuario_mention, prefixo='r ', permitir_expressao_com_dados=True):
     # Decide entre rolagem simples (d20/4df) e expressão mista com dados embutidos.
     conteudo = conteudo.strip()
     if not conteudo:
@@ -393,6 +418,10 @@ def processar_entrada_rolagem(conteudo, usuario_id, usuario_mention, prefixo='r 
     mensagens = processar_rolagem_dados(conteudo, usuario_id, usuario_mention)
     if mensagens:
         return mensagens, extrair_metadados_rolagem(conteudo, mensagens)
+
+    if not permitir_expressao_com_dados:
+        if not eh_expressao_aditiva_de_dados(conteudo):
+            return None, None
 
     try:
         mensagens = processar_expressao_com_dados(conteudo, usuario_mention, prefixo=prefixo)
@@ -1175,16 +1204,29 @@ async def on_message(message):
         await message.channel.send(f'Usuário `{alvo_id}` foi removido dos banidos.')
         return
 
-    # Matchers gerais para rolagem com prefixo `r` e gatilho "jandei".
+    # Matchers gerais para rolagem com prefixo `r`, rolagens simples sem prefixo e gatilho "jandei".
     comando_rolagem = re.match(r'^r(?=\s|[()\d+\-dD])\s*(.*)$', message.content, re.IGNORECASE)
+    conteudo_sem_prefixo = message.content.strip()
+    comando_rolagem_sem_prefixo = eh_rolagem_simples(conteudo_sem_prefixo) or eh_expressao_aditiva_de_dados(conteudo_sem_prefixo)
     match4 = re.search(r'jandei', message.content, re.IGNORECASE)
     jandei_foi_mencionado = any(mencionado.id == id_jandei for mencionado in message.mentions)
 
     if comando_rolagem:
         expressao_rolagem = (comando_rolagem.group(1) or '').strip()
-        mensagens, metadados = processar_entrada_rolagem(expressao_rolagem, usuario.id, usuario.mention, prefixo='r ')
+        mensagens, metadados = processar_entrada_rolagem(expressao_rolagem, usuario.id, usuario.mention, prefixo='r ', permitir_expressao_com_dados=True)
         if not mensagens:
             await message.channel.send(f'{usuario.mention} expressão inválida. Use: `r d20+5`, `r 4df atacar` ou `r 1d20+4df+3d6`.')
+            return
+
+        for mensagem in mensagens:
+            await message.channel.send(mensagem)
+
+        if metadados and metadados['teve_mais_quatro'] and metadados['acao_fate'] in ('Atacar', 'Defender', 'Criar Vantagem', 'Superar'):
+            await tocar_audio_ao_mais_quatro(usuario, message.channel, metadados['acao_fate'])
+        return
+    elif comando_rolagem_sem_prefixo:
+        mensagens, metadados = processar_entrada_rolagem(conteudo_sem_prefixo, usuario.id, usuario.mention, prefixo='', permitir_expressao_com_dados=False)
+        if not mensagens:
             return
 
         for mensagem in mensagens:

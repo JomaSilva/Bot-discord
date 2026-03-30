@@ -2,7 +2,8 @@
 
 Bot para Discord com:
 
-- rolagens de dados comuns e expressões com dados via prefixo `r` (`r d20`, `r 1d20+4df+3d6`...)
+- rolagens de dados comuns sem prefixo (`d20`, `4df atacar`, `1d20+2d6`...)
+- expressões matemáticas com dados via prefixo `r` (`r 5*4/1d20+14`, `r 1d20+4df+3d6`...)
 - rolagens Fate (`df`, incluindo regra especial para `4df`)
 - cálculo matemático seguro com `r <expressão>`
 - tema musical por usuário no `++++`
@@ -103,10 +104,14 @@ No Windows, o bot tenta encontrar o `ffmpeg.exe` automaticamente em caminhos com
 
 ## Rolagens de Dados
 
-No chat, as rolagens de texto agora só são interpretadas quando começam com `r`.
+No chat, rolagens simples e somas/subtrações de dados podem ser enviadas sem prefixo.
+Quando a expressão tiver conta mais complexa, como multiplicação, divisão ou parênteses, use `r`.
 
 Exemplos:
 
+- `d20+5`
+- `4df atacar`
+- `1d20+2d6`
 - `r d20+5`
 - `r 4df atacar`
 - `r 1d20+4df+3d6`
@@ -117,29 +122,30 @@ Exemplos:
 Formato:
 
 ```text
-r [quantidade]d[lados][modificadores] [texto opcional]
+[quantidade]d[lados][modificadores] [texto opcional]
 ```
 
 Exemplos:
 
-- `r d20`
-- `r 2d6+3`
-- `r 3d10-1 ataque pesado`
+- `d20`
+- `2d6+3`
+- `3d10-1 ataque pesado`
+- `1d20+2d6`
 
 ### Dados Fate (`df`)
 
 Formato geral:
 
 ```text
-r [quantidade]df[modificadores] [texto opcional]
+[quantidade]df[modificadores] [texto opcional]
 ```
 
 Exemplos:
 
-- `r df`
-- `r 4df atacar`
-- `r 4df defender escudo`
-- `r 4df criar vantagem terreno alto`
+- `df`
+- `4df atacar`
+- `4df defender escudo`
+- `4df criar vantagem terreno alto`
 - `r 23*73/4df+87`
 
 ### Regra especial para `4df`
@@ -187,7 +193,7 @@ Exemplos:
 - `r 1d20+4df+3d6`
 - `r 5*4/1d20+14`
 
-O cálculo é validado via AST (mais seguro que `eval`) e pode misturar números com múltiplos tipos de dado.
+O cálculo é validado via AST (mais seguro que `eval`) e pode misturar números com múltiplos tipos de dado. Sem `r`, o bot fica só nas rolagens simples e nas somas/subtrações de dados.
 
 ---
 
