@@ -363,7 +363,8 @@ def processar_expressao_com_dados(conteudo, usuario_mention, prefixo='r '):
 
     mensagem = f'{usuario_mention} `{prefixo}{conteudo}` = **{resultado_formatado}**'
     if detalhes_dados:
-        mensagem += f' | Substituída: `{expressao_substituida}` | Dados: {'; '.join(detalhes_dados)}'
+    
+        mensagem += f' | Substituída: `{expressao_substituida}` | Dados: {"; ".join(detalhes_dados)}'
 
     return [mensagem]
 
