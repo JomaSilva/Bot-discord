@@ -303,6 +303,106 @@ def calcular_expressao(expr):
     return avaliar(arvore.body)
 
 
+def formatar_numero_resultado(valor):
+    # Normaliza números para evitar floats longos demais nas respostas do bot.
+    if isinstance(valor, float):
+        if valor.is_integer():
+            return str(int(valor))
+        return f'{valor:.6f}'.rstrip('0').rstrip('.')
+    return str(valor)
+
+
+def mensagens_usuario_banido(usuario_mention):
+    # Centraliza a resposta enviada para usuários bloqueados.
+    return [
+        f'Desculpe {usuario_mention}, eu não escuto furries',
+        'mas caso queira falar comigo, resolva esta simples questao de matemática:',
+        'https://media.discordapp.net/attachments/1190477143763853393/1471694458629128266/image.png?ex=698fddc5&is=698e8c45&hm=f441a1748e0751a108d3d4adf454c036d63e1f650be231bdf31d4db38340f084&=&format=webp&quality=lossless'
+    ]
+
+
+def rolar_termo_dados_em_expressao(termo):
+    # Resolve um único termo de dado usado dentro de uma expressão matemática maior.
+    match = re.fullmatch(r'(\d*)d(f|\d+)', termo.strip(), re.IGNORECASE)
+    if not match:
+        raise ValueError('Termo de dado inválido.')
+
+    quantidade = int(match.group(1)) if match.group(1) else 1
+    if quantidade <= 0:
+        raise ValueError('A quantidade de dados precisa ser positiva.')
+
+    identificador = match.group(2).lower()
+    if identificador == 'f':
+        rolls = [random.randint(-1, 1) for _ in range(quantidade)]
+        simbolos = [fate_dice[item] for item in rolls]
+        total = sum(rolls)
+        return total, f'{termo}=[{", ".join(simbolos)}] (Total: {formatar_numero_resultado(total)})'
+
+    lados = int(identificador)
+    if lados <= 0:
+        raise ValueError('A quantidade de lados precisa ser positiva.')
+
+    rolls = [random.randint(1, lados) for _ in range(quantidade)]
+    total = sum(rolls)
+    return total, f'{termo}={rolls} (Total: {formatar_numero_resultado(total)})'
+
+
+def processar_expressao_com_dados(conteudo, usuario_mention, prefixo='r '):
+    # Permite misturar matemática e múltiplos tipos de dados em uma única expressão.
+    detalhes_dados = []
+
+    def substituir(match):
+        termo = match.group(0)
+        total, detalhes = rolar_termo_dados_em_expressao(termo)
+        detalhes_dados.append(detalhes)
+        return str(total)
+
+    expressao_substituida = re.sub(r'(?<![\w])(\d*d(?:f|\d+))(?![\w])', substituir, conteudo, flags=re.IGNORECASE)
+    resultado = calcular_expressao(expressao_substituida)
+    resultado_formatado = formatar_numero_resultado(resultado)
+
+    mensagem = f'{usuario_mention} `{prefixo}{conteudo}` = **{resultado_formatado}**'
+    if detalhes_dados:
+        mensagem += f' | Substituída: `{expressao_substituida}` | Dados: {'; '.join(detalhes_dados)}'
+
+    return [mensagem]
+
+
+def extrair_metadados_rolagem(conteudo, mensagens):
+    # Identifica se a rolagem simples permite efeitos especiais como o áudio do ++++.
+    match_fate = re.match(r'^(\d*)df((?:\s*[+-]\s*\d+)*)(?:\s+(.*))?$', conteudo.strip(), re.IGNORECASE)
+    acao_fate = None
+    if match_fate and (int(match_fate.group(1)) if match_fate.group(1) else 1) == 4:
+        acao_fate, _complemento = extrair_acao_e_complemento_fate(match_fate.group(3))
+
+    return {
+        'acao_fate': acao_fate,
+        'teve_mais_quatro': '+, +, +, +' in ' '.join(mensagens),
+    }
+
+
+def processar_entrada_rolagem(conteudo, usuario_id, usuario_mention, prefixo='r '):
+    # Decide entre rolagem simples (d20/4df) e expressão mista com dados embutidos.
+    conteudo = conteudo.strip()
+    if not conteudo:
+        return [f'{usuario_mention} use: `r d20+5`, `r 4df atacar` ou `r 1d20+4df+3d6`'], None
+
+    if usuario_id in usuarios_banidos:
+        return mensagens_usuario_banido(usuario_mention), None
+
+    mensagens = processar_rolagem_dados(conteudo, usuario_id, usuario_mention)
+    if mensagens:
+        return mensagens, extrair_metadados_rolagem(conteudo, mensagens)
+
+    try:
+        mensagens = processar_expressao_com_dados(conteudo, usuario_mention, prefixo=prefixo)
+        return mensagens, {'acao_fate': None, 'teve_mais_quatro': False}
+    except ZeroDivisionError:
+        return [f'{usuario_mention} não dá para dividir por zero nessa expressão.'], None
+    except Exception:
+        return None, None
+
+
 def escala_adjetivos_jjk(total):
     # Converte o total Fate em uma escala adjetiva inspirada em JJK.
     if total >= 9:
@@ -671,11 +771,7 @@ def processar_rolagem_dados(conteudo, usuario_id, usuario_mention):
 
     if match:
         if usuario_id in usuarios_banidos:
-            return [
-                f'Desculpe {usuario_mention}, eu não escuto furries',
-                'mas caso queira falar comigo, resolva esta simples questao de matemática:',
-                'https://media.discordapp.net/attachments/1190477143763853393/1471694458629128266/image.png?ex=698fddc5&is=698e8c45&hm=f441a1748e0751a108d3d4adf454c036d63e1f650be231bdf31d4db38340f084&=&format=webp&quality=lossless'
-            ]
+            return mensagens_usuario_banido(usuario_mention)
 
         num_dice = int(match.group(1)) if match.group(1) else 1
         sides = int(match.group(2))
@@ -693,11 +789,7 @@ def processar_rolagem_dados(conteudo, usuario_id, usuario_mention):
 
     if match2:
         if usuario_id in usuarios_banidos:
-            return [
-                f'Desculpe {usuario_mention}, eu não escuto furries',
-                'mas caso queira falar comigo, resolva esta simples questao de matemática:',
-                'https://media.discordapp.net/attachments/1190477143763853393/1471694458629128266/image.png?ex=698fddc5&is=698e8c45&hm=f441a1748e0751a108d3d4adf454c036d63e1f650be231bdf31d4db38340f084&=&format=webp&quality=lossless'
-            ]
+            return mensagens_usuario_banido(usuario_mention)
 
         num_dice = int(match2.group(1)) if match2.group(1) else 1
         mods = match2.group(2) if match2.group(2) else ''
@@ -766,31 +858,22 @@ async def on_ready():
     print(f'We have logged in as {client.user}')
 
 
-@tree.command(name='roll', description='Rola dados com expressão tipo d20, 2d6+3, 4df atacar')
-@app_commands.describe(expressao='Ex: d20+5, 4df atacar banana, 2d8-1')
+@tree.command(name='roll', description='Rola dados simples ou expressões como 1d20+4df+3d6')
+@app_commands.describe(expressao='Ex: d20+5, 4df atacar banana, 1d20+4df+3d6')
 async def roll_slash(interaction: discord.Interaction, expressao: str):
-    # Comando /roll: usa o processador central e dispara áudio no ++++ válido.
-    mensagens = processar_rolagem_dados(expressao, interaction.user.id, interaction.user.mention)
+    # Comando /roll: aceita rolagens simples e expressões com múltiplos tipos de dado.
+    mensagens, metadados = processar_entrada_rolagem(expressao, interaction.user.id, interaction.user.mention, prefixo='')
     if not mensagens:
-        await interaction.response.send_message('Expressão inválida. Use exemplos: `d20+5`, `2d6`, `4df atacar`')
+        await interaction.response.send_message('Expressão inválida. Use exemplos: `d20+5`, `4df atacar` ou `1d20+4df+3d6`')
         return
 
     await interaction.response.send_message(mensagens[0])
     for msg in mensagens[1:]:
         await interaction.followup.send(msg)
 
-    if interaction.channel is not None:
-        conteudo_msgs = ' '.join(mensagens)
-        teve_mais_quatro = '+, +, +, +' in conteudo_msgs
-        num_df_slash = re.match(r'^(\d*)df', expressao.strip(), re.IGNORECASE)
-        acao_slash = None
-        if num_df_slash and (int(num_df_slash.group(1)) if num_df_slash.group(1) else 1) == 4:
-            match_df_completo = re.match(r'^(\d*)df((?:\s*[+-]\s*\d+)*)(?:\s+(.*))?$', expressao.strip(), re.IGNORECASE)
-            if match_df_completo:
-                acao_slash, _comp = extrair_acao_e_complemento_fate(match_df_completo.group(3))
-
-        if teve_mais_quatro and acao_slash in ('Atacar', 'Defender', 'Criar Vantagem', 'Superar'):
-            await tocar_audio_ao_mais_quatro(interaction.user, interaction.channel, acao_slash)
+    if interaction.channel is not None and metadados:
+        if metadados['teve_mais_quatro'] and metadados['acao_fate'] in ('Atacar', 'Defender', 'Criar Vantagem', 'Superar'):
+            await tocar_audio_ao_mais_quatro(interaction.user, interaction.channel, metadados['acao_fate'])
 
 
 @tree.command(name='tema', description='Define seu tema de ++++ usando link (YouTube, SoundCloud etc.)')
@@ -1051,7 +1134,7 @@ async def on_message(message):
             await message.channel.send(f'Modo de teste removido para `{alvo_id}`.')
         else:
             usuarios_teste.add(alvo_id)
-            await message.channel.send(f'Modo de teste ativado para `{alvo_id}`. Em `4df`, a pessoa pode usar `max`/`min` no fim da mensagem.')
+            await message.channel.send(f'Modo de teste ativado para `{alvo_id}`. Em `r 4df atacar`, a pessoa pode usar `max`/`min` no fim da mensagem.')
         return
 
     # !ban: bloqueia usuário para comandos de rolagem.
@@ -1092,119 +1175,24 @@ async def on_message(message):
         await message.channel.send(f'Usuário `{alvo_id}` foi removido dos banidos.')
         return
 
-    # Matchers gerais para rolagens e gatilho "jandei".
-    match = re.match(r'^(\d*)d(\d+)((?:\s*[+-]\s*\d+)*)(?:\s+(.*))?$', message.content, re.IGNORECASE)
-    match2 = re.match(r'^(\d*)df((?:\s*[+-]\s*\d+)*)(?:\s+(.*))?$', message.content, re.IGNORECASE)
-    # `r` só aceita expressão matemática real (evita capturar palavras aleatórias).
-    match3 = re.match(r'^r\s*((?:\d+(?:\.\d+)?|\.\d+)\s*(?:(?:\*\*|//|[+\-*/%])\s*[-+]?(?:\d+(?:\.\d+)?|\.\d+)\s*)+)$', message.content)
+    # Matchers gerais para rolagem com prefixo `r` e gatilho "jandei".
+    comando_rolagem = re.match(r'^r(?=\s|[()\d+\-dD])\s*(.*)$', message.content, re.IGNORECASE)
     match4 = re.search(r'jandei', message.content, re.IGNORECASE)
     jandei_foi_mencionado = any(mencionado.id == id_jandei for mencionado in message.mentions)
 
-    # Fluxo de rolagem de dados comuns (d20, 2d6+3 etc.).
-    if match:
-        if usuario.id in usuarios_banidos:
-            await message.channel.send(f'Desculpe {usuario.mention}, eu não escuto furries')
-            await message.channel.send('mas caso queira falar comigo, resolva esta simples questao de matemática:')
-            await message.channel.send('https://media.discordapp.net/attachments/1190477143763853393/1471694458629128266/image.png?ex=698fddc5&is=698e8c45&hm=f441a1748e0751a108d3d4adf454c036d63e1f650be231bdf31d4db38340f084&=&format=webp&quality=lossless')
-            return
-        num_dice = int(match.group(1)) if match.group(1) else 1
-        sides = int(match.group(2))
-        mods = match.group(3) if match.group(3) else ''
-        bonus = 0
-        mod_display = ''
-        mods_encontrados = re.findall(r'([+-])\s*(\d+)', mods)
-        if mods_encontrados:
-            bonus = sum(int(valor) if sinal == '+' else -int(valor) for sinal, valor in mods_encontrados)
-            mod_display = ''.join(f'{sinal}{valor}' for sinal, valor in mods_encontrados)
-
-        texto_adicional = match.group(4) if match.group(4) else ''
-        rolls = [random.randint(1, sides) for _ in range(num_dice)]
-        await message.channel.send(f'{usuario.mention} rolled: {rolls} {mod_display} (**Total: {sum(rolls) + bonus}**) {texto_adicional}')
-    # Fluxo de rolagem Fate (df), incluindo regras de ação e efeitos especiais.
-    elif match2:
-        if usuario.id in usuarios_banidos:
-            await message.channel.send(f'Desculpe {usuario.mention}, eu não escuto furries')
-            await message.channel.send('mas caso queira falar comigo, resolva esta simples questao de matemática:')
-            await message.channel.send('https://media.discordapp.net/attachments/1190477143763853393/1471694458629128266/image.png?ex=698fddc5&is=698e8c45&hm=f441a1748e0751a108d3d4adf454c036d63e1f650be231bdf31d4db38340f084&=&format=webp&quality=lossless')
+    if comando_rolagem:
+        expressao_rolagem = (comando_rolagem.group(1) or '').strip()
+        mensagens, metadados = processar_entrada_rolagem(expressao_rolagem, usuario.id, usuario.mention, prefixo='r ')
+        if not mensagens:
+            await message.channel.send(f'{usuario.mention} expressão inválida. Use: `r d20+5`, `r 4df atacar` ou `r 1d20+4df+3d6`.')
             return
 
+        for mensagem in mensagens:
+            await message.channel.send(mensagem)
 
-        num_dice = int(match2.group(1)) if match2.group(1) else 1
-        mods = match2.group(2) if match2.group(2) else ''
-        bonus = 0
-        mod_display = ''
-        mods_encontrados = re.findall(r'([+-])\s*(\d+)', mods)
-        if mods_encontrados:
-            bonus = sum(int(valor) if sinal == '+' else -int(valor) for sinal, valor in mods_encontrados)
-            mod_display = ''.join(f'{sinal}{valor}' for sinal, valor in mods_encontrados)
-
-        texto_adicional_bruto = match2.group(3)
-        acao_fate = None
-        complemento_fate = None
-        forcagem_teste = None
-        if num_dice == 4:
-            acao_fate, complemento_fate = extrair_acao_e_complemento_fate(texto_adicional_bruto)
-            if not acao_fate:
-                await message.channel.send(
-                    f"{usuario.mention} em `4df` você precisa escolher uma ação: `Atacar`, `Defender`, `Criar Vantagem` ou `Superar`."
-                )
-                return
-            if usuario.id in usuarios_teste:
-                forcagem_teste, complemento_fate = extrair_forcagem_teste(complemento_fate)
-
-        texto_adicional = None
-        if num_dice == 4:
-            if complemento_fate:
-                texto_adicional = f"→ '{complemento_fate}'"
-        elif texto_adicional_bruto:
-            texto_adicional = f"→ '{texto_adicional_bruto}'"
-
-        if num_dice == 4 and forcagem_teste == 'max':
-            rolls = [1, 1, 1, 1]
-        elif num_dice == 4 and forcagem_teste == 'min':
-            rolls = [-1, -1, -1, -1]
-        else:
-            rolls = [random.randint(-1, 1) for _ in range(num_dice)]
-        rolls_fate = []
-        for i in rolls:
-            rolls_fate.append(fate_dice[i])
-        dados_organizados = ', '.join(rolls_fate)
-        total_fate = sum(rolls) + bonus
-        escala = escala_adjetivos_jjk(total_fate)
-        if rolls_fate == ['+','+','+','+'] and acao_fate == 'Atacar':
-            await message.channel.send('Black Flash!')
-            await message.channel.send('https://tenor.com/view/jjk-jjk-s2-jjk-season-2-jujutsu-kaisen-jujutsu-kaisen-s2-gif-7964484372484357392')
-            await message.channel.send(f"{usuario.mention} rolled: [**{dados_organizados}**]{mod_display} (**Total: {total_fate}**) | Escala: **{escala}** {f'| Ação: **{acao_fate}** ' if acao_fate else ''}{texto_adicional if texto_adicional else ''}")
-            await tocar_audio_ao_mais_quatro(usuario, message.channel, acao_fate)
-        elif rolls_fate == ['-','-','-','-']:
-            await message.channel.send(f"{usuario.mention} rolled: [**{dados_organizados}**]{mod_display} (**Total: {total_fate}**) | Escala: **{escala}** {f'| Ação: **{acao_fate}** ' if acao_fate else ''}{texto_adicional if texto_adicional else ''} ")
-            await message.channel.send('https://cdn.discordapp.com/attachments/1264409229150785609/1451361408028639316/a5z6jq.gif?ex=698f1064&is=698dbee4&hm=a1ecc438a4c2434f9ea70349dd156d6ac2d7c5197ce7dc0b801974d462b55fb5')
-        else:
-            await message.channel.send(f"{usuario.mention} rolled: [{dados_organizados}]{mod_display} (**Total: {total_fate}**) | Escala: **{escala}** {f'| Ação: **{acao_fate}** ' if acao_fate else ''}{texto_adicional if texto_adicional else ''} ")
-            if rolls_fate == ['+','+','+','+'] and acao_fate in ('Defender', 'Criar Vantagem', 'Superar'):
-                await tocar_audio_ao_mais_quatro(usuario, message.channel, acao_fate)
-    # Fluxo de cálculo matemático seguro com comando r.
-    elif match3:
-        if usuario.id in usuarios_banidos:
-            await message.channel.send(f'Desculpe {usuario.mention}, eu não escuto furries')
-            await message.channel.send('mas caso queira falar comigo, resolva esta simples questao de matemática:')
-            await message.channel.send('https://media.discordapp.net/attachments/1190477143763853393/1471694458629128266/image.png?ex=698fddc5&is=698e8c45&hm=f441a1748e0751a108d3d4adf454c036d63e1f650be231bdf31d4db38340f084&=&format=webp&quality=lossless')
-            return
-
-        expr = match3.group(1).strip()
-        if not expr:
-            await message.channel.send(f'{usuario.mention} use: `r 2 + 3 * (4 - 1)`')
-            return
-
-        try:
-            resultado = calcular_expressao(expr)
-            if isinstance(resultado, float) and resultado.is_integer():
-                resultado = int(resultado)
-            await message.channel.send(f'{usuario.mention} `r {expr}` = **{resultado}**')
-        except ZeroDivisionError:
-            await message.channel.send(f'{usuario.mention} não dá para dividir por zero.')
-        except Exception:
-            await message.channel.send(f'{usuario.mention} expressão inválida. Exemplo: `r (10 + 5) * 2 - 3/4`')
+        if metadados and metadados['teve_mais_quatro'] and metadados['acao_fate'] in ('Atacar', 'Defender', 'Criar Vantagem', 'Superar'):
+            await tocar_audio_ao_mais_quatro(usuario, message.channel, metadados['acao_fate'])
+        return
     # Gatilho por texto/menção de "jandei", redirecionando para canal específico.
     elif match4 or jandei_foi_mencionado:
         canal_destino = client.get_channel(1471692261371674676)

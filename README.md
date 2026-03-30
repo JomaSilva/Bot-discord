@@ -2,7 +2,7 @@
 
 Bot para Discord com:
 
-- rolagens de dados comuns (`d20`, `2d6+3`...)
+- rolagens de dados comuns e expressões com dados via prefixo `r` (`r d20`, `r 1d20+4df+3d6`...)
 - rolagens Fate (`df`, incluindo regra especial para `4df`)
 - cálculo matemático seguro com `r <expressão>`
 - tema musical por usuário no `++++`
@@ -93,7 +93,7 @@ No Windows, o bot tenta encontrar o `ffmpeg.exe` automaticamente em caminhos com
 - `!adm @usuario` ou `!adm ID` (admin)
 	- Adiciona novo admin
 - `!teste @usuario` ou `!teste ID` (admin)
-	- Ativa/desativa modo de teste para o alvo (permite `max`/`min` em `4df`)
+	- Ativa/desativa modo de teste para o alvo (permite `max`/`min` em `r 4df`)
 - `!ban @usuario` ou `!ban ID` (admin)
 	- Bloqueia usuário para rolagens/comandos de rolagem
 - `!desbanir @usuario` ou `!desbanir ID` (admin)
@@ -103,38 +103,48 @@ No Windows, o bot tenta encontrar o `ffmpeg.exe` automaticamente em caminhos com
 
 ## Rolagens de Dados
 
+No chat, as rolagens de texto agora só são interpretadas quando começam com `r`.
+
+Exemplos:
+
+- `r d20+5`
+- `r 4df atacar`
+- `r 1d20+4df+3d6`
+- `r 5*4/1d20+14`
+
 ### Dados comuns
 
 Formato:
 
 ```text
-[quantidade]d[lados][modificadores] [texto opcional]
+r [quantidade]d[lados][modificadores] [texto opcional]
 ```
 
 Exemplos:
 
-- `d20`
-- `2d6+3`
-- `3d10-1 ataque pesado`
+- `r d20`
+- `r 2d6+3`
+- `r 3d10-1 ataque pesado`
 
 ### Dados Fate (`df`)
 
 Formato geral:
 
 ```text
-[quantidade]df[modificadores] [texto opcional]
+r [quantidade]df[modificadores] [texto opcional]
 ```
 
 Exemplos:
 
-- `df`
-- `4df atacar`
-- `4df defender escudo`
-- `4df criar vantagem terreno alto`
+- `r df`
+- `r 4df atacar`
+- `r 4df defender escudo`
+- `r 4df criar vantagem terreno alto`
+- `r 23*73/4df+87`
 
 ### Regra especial para `4df`
 
-Quando for `4df`, **é obrigatório informar a ação**:
+Quando for uma rolagem simples de `4df`, **é obrigatório informar a ação**:
 
 - `Atacar`
 - `Defender`
@@ -142,6 +152,8 @@ Quando for `4df`, **é obrigatório informar a ação**:
 - `Superar`
 
 Se a ação não for informada, o bot avisa e não rola.
+
+Em expressões matemáticas maiores, como `r 1d20+4df+3d6` ou `r 23*73/4df+87`, o `4df` é tratado como um termo numérico normal da expressão.
 
 ---
 
@@ -155,7 +167,7 @@ Usuários com modo de teste ativo podem forçar resultado em `4df`:
 Exemplo:
 
 ```text
-4df atacar max
+r 4df atacar max
 ```
 
 ---
@@ -172,8 +184,10 @@ Exemplos:
 
 - `r 2 + 3 * 4`
 - `r (10 + 5) * 2 - 3/4`
+- `r 1d20+4df+3d6`
+- `r 5*4/1d20+14`
 
-O cálculo é validado via AST (mais seguro que `eval`).
+O cálculo é validado via AST (mais seguro que `eval`) e pode misturar números com múltiplos tipos de dado.
 
 ---
 
