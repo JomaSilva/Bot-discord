@@ -195,6 +195,8 @@ Exemplos:
 
 O cálculo é validado via AST (mais seguro que `eval`) e pode misturar números com múltiplos tipos de dado. Sem `r`, o bot fica só nas rolagens simples e nas somas/subtrações de dados.
 
+Qualquer tentativa de usar quantidade de dados ou número de lados acima de `1000000` faz o bot recusar a rolagem e adicionar o autor à lista de banidos.
+
 ---
 
 ## Permissões e listas internas

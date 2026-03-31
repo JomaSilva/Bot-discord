@@ -45,6 +45,11 @@ usuarios_teste = set()
 id_jandei = 332954449918165003
 ids_admin = [316323635470270475]
 
+# Limite máximo aceito para quantidade de dados e lados numéricos.
+LIMITE_VALOR_DADO = 1_000_000
+LIMITE_VALOR_DADO_TEXTO = str(LIMITE_VALOR_DADO)
+PADRAO_TERMO_DADO = re.compile(r'(?<![\w])(\d*)d(f|\d+)(?![\w])', re.IGNORECASE)
+
 # Configuração base do cliente Discord e comandos slash.
 # No macOS, algumas instalações novas de Python não expõem uma cadeia CA confiável ao aiohttp.
 _ssl_context_verificado = ssl.create_default_context(cafile=certifi.where())
@@ -321,6 +326,48 @@ def mensagens_usuario_banido(usuario_mention):
     ]
 
 
+def mensagens_ban_por_valor_dado_excessivo(usuario_mention, termo):
+    # Informa que o limite permitido foi ultrapassado e que o usuário foi bloqueado.
+    return [
+        f'{usuario_mention} valores de dado acima de `{LIMITE_VALOR_DADO}` não são permitidos.',
+        f'Você foi adicionado à lista de banidos por tentar usar `{termo}`.'
+    ]
+
+
+def valor_dado_excede_limite(valor_texto):
+    # Compara o valor textual com o limite sem depender de int para números enormes.
+    if not valor_texto:
+        return False
+
+    valor_normalizado = valor_texto.lstrip('0') or '0'
+    if len(valor_normalizado) != len(LIMITE_VALOR_DADO_TEXTO):
+        return len(valor_normalizado) > len(LIMITE_VALOR_DADO_TEXTO)
+
+    return valor_normalizado > LIMITE_VALOR_DADO_TEXTO
+
+
+def validar_limite_termos_dado(conteudo, usuario_id, usuario_mention):
+    # Bloqueia automaticamente quem tentar usar quantidade/lados acima do limite.
+    for match in PADRAO_TERMO_DADO.finditer(conteudo):
+        termo = match.group(0)
+        quantidade_texto = match.group(1)
+        if valor_dado_excede_limite(quantidade_texto):
+            if usuario_id not in usuarios_banidos:
+                usuarios_banidos.append(usuario_id)
+            return mensagens_ban_por_valor_dado_excessivo(usuario_mention, termo)
+
+        identificador = match.group(2).lower()
+        if identificador == 'f':
+            continue
+
+        if valor_dado_excede_limite(identificador):
+            if usuario_id not in usuarios_banidos:
+                usuarios_banidos.append(usuario_id)
+            return mensagens_ban_por_valor_dado_excessivo(usuario_mention, termo)
+
+    return None
+
+
 def rolar_termo_dados_em_expressao(termo):
     # Resolve um único termo de dado usado dentro de uma expressão matemática maior.
     match = re.fullmatch(r'(\d*)d(f|\d+)', termo.strip(), re.IGNORECASE)
@@ -357,7 +404,7 @@ def processar_expressao_com_dados(conteudo, usuario_mention, prefixo='r '):
         detalhes_dados.append(detalhes)
         return str(total)
 
-    expressao_substituida = re.sub(r'(?<![\w])(\d*d(?:f|\d+))(?![\w])', substituir, conteudo, flags=re.IGNORECASE)
+    expressao_substituida = PADRAO_TERMO_DADO.sub(substituir, conteudo)
     resultado = calcular_expressao(expressao_substituida)
     resultado_formatado = formatar_numero_resultado(resultado)
 
@@ -415,6 +462,10 @@ def processar_entrada_rolagem(conteudo, usuario_id, usuario_mention, prefixo='r 
 
     if usuario_id in usuarios_banidos:
         return mensagens_usuario_banido(usuario_mention), None
+
+    mensagens_limite = validar_limite_termos_dado(conteudo, usuario_id, usuario_mention)
+    if mensagens_limite:
+        return mensagens_limite, None
 
     mensagens = processar_rolagem_dados(conteudo, usuario_id, usuario_mention)
     if mensagens:
