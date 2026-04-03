@@ -103,6 +103,10 @@ No Windows, o bot tenta encontrar o `ffmpeg.exe` automaticamente em caminhos com
 	- Adiciona novo admin
 - `!teste @usuario` ou `!teste ID` (admin)
 	- Ativa/desativa modo de teste para o alvo (permite `max`/`min` em `r 4df`)
+- `!max @usuario` ou `!max ID` (admin)
+	- Força o próximo `4df` simples do alvo para `+4`
+- `!min @usuario` ou `!min ID` (admin)
+	- Força o próximo `4df` simples do alvo para `-4`
 - `!ban @usuario` ou `!ban ID` (admin)
 	- Bloqueia usuário para rolagens/comandos de rolagem
 - `!desbanir @usuario` ou `!desbanir ID` (admin)
@@ -185,6 +189,32 @@ Exemplo:
 ```text
 r 4df atacar max
 ```
+
+---
+
+## Forçagem admin do próximo `4df`
+
+Admins podem agendar uma única forcagem para a próxima rolagem simples de `4df` de um usuário:
+
+- `!max 123456789012345678`
+- `!min 123456789012345678`
+- `!max @usuario`
+- `!min @usuario`
+
+Essa forcagem fica pendente até o alvo fazer um `4df` simples e é consumida automaticamente na rolagem.
+
+---
+
+## Console local no terminal
+
+Enquanto o bot estiver rodando no terminal do seu PC, você também pode digitar comandos direto nele para interferir no bot sem mandar mensagem no Discord:
+
+- `!max 123456789012345678`
+- `!min 123456789012345678`
+- `!status`
+- `!help`
+
+O console local controla as mesmas forcagens pendentes usadas pelos comandos de admin do Discord.
 
 ---
 

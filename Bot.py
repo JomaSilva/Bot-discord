@@ -10,6 +10,7 @@ import ssl
 import glob
 import asyncio
 import shutil
+import sys
 from typing import Any, cast
 import aiohttp.connector
 import certifi
@@ -19,7 +20,7 @@ import yt_dlp
 # VISÃO GERAL DO BOT (handoff para outro dev)
 #
 # 1) Entradas suportadas:
-#    - Comandos de texto: !luta, !tocar, !skipar, !parar, !tema, !ban, !desbanir, !adm, !teste
+#    - Comandos de texto: !luta, !tocar, !skipar, !parar, !tema, !ban, !desbanir, !adm, !teste, !max, !min
 #    - Comandos slash: /roll, /tema, /ban, /desbanir
 #    - Mensagens de rolagem: dN e df (ex.: d20+3, 4df atacar)
 #
@@ -86,6 +87,7 @@ ACOES_FATE_VALIDAS = {
     'atacar': 'Atacar',
     'atk': 'Atacar',
     'defender': 'Defender',
+    'def': 'Defender',
     'criar vantagem': 'Criar Vantagem',
     'vantagem': 'Criar Vantagem',
     'criar': 'Criar Vantagem',
@@ -129,6 +131,10 @@ canal_texto_reproducao = {}
 
 # Tema personalizado de cada usuário para ativação no ++++.
 temas_usuario = {}
+
+# Forçagens administrativas para a próxima rolagem simples de 4df por usuário.
+forcagens_proximo_4df = {}
+tarefa_console_local = None
 
 
 def cancelar_playlist_luta(guild_id):
@@ -642,6 +648,86 @@ def eh_admin(usuario_id):
     return usuario_id in ids_admin
 
 
+def descrever_forcagem_fate(tipo_forcagem):
+    # Converte o tipo interno de forcagem em descrição legível.
+    if tipo_forcagem == 'max':
+        return '+4 (++++)'
+    if tipo_forcagem == 'min':
+        return '-4 (----)'
+    raise ValueError('Tipo de forcagem Fate inválido.')
+
+
+def registrar_forcagem_proximo_4df(usuario_id, tipo_forcagem):
+    # Agenda uma única forcagem para a próxima rolagem simples de 4df do usuário.
+    if tipo_forcagem not in ('max', 'min'):
+        raise ValueError('Tipo de forcagem Fate inválido.')
+
+    forcagens_proximo_4df[usuario_id] = tipo_forcagem
+    return f'Próximo `4df` de `{usuario_id}` será forçado para {descrever_forcagem_fate(tipo_forcagem)}.'
+
+
+def consumir_forcagem_proximo_4df(usuario_id):
+    # Usa e remove a forcagem pendente do usuário, se existir.
+    return forcagens_proximo_4df.pop(usuario_id, None)
+
+
+def resumir_forcagens_pendentes():
+    # Resume as forcagens administrativas ainda não consumidas.
+    if not forcagens_proximo_4df:
+        return 'Nenhuma forcagem pendente.'
+
+    partes = [
+        f'{usuario_id}: {descrever_forcagem_fate(tipo_forcagem)}'
+        for usuario_id, tipo_forcagem in sorted(forcagens_proximo_4df.items())
+    ]
+    return 'Forcagens pendentes: ' + ', '.join(partes)
+
+
+def interpretar_comando_terminal_local(linha):
+    # Interpreta comandos administrativos digitados no terminal local do processo.
+    linha_limpa = ' '.join((linha or '').strip().split())
+    if not linha_limpa:
+        return None
+
+    if re.fullmatch(r'!?help', linha_limpa, re.IGNORECASE):
+        return 'Comandos locais: !max ID, !min ID, !status, !help.'
+
+    if re.fullmatch(r'!?status', linha_limpa, re.IGNORECASE):
+        return resumir_forcagens_pendentes()
+
+    match_forcagem = re.fullmatch(r'!?(max|min)(?:\s+(.*))?', linha_limpa, re.IGNORECASE)
+    if match_forcagem:
+        tipo_forcagem = match_forcagem.group(1).lower()
+        alvo_id = extrair_id_de_texto(match_forcagem.group(2) or '')
+        if not alvo_id:
+            return f'Use `!{tipo_forcagem} ID` no terminal local.'
+        return registrar_forcagem_proximo_4df(alvo_id, tipo_forcagem)
+
+    return 'Comando local inválido. Use !help para ver os comandos disponíveis.'
+
+
+async def console_terminal_local():
+    # Mantém um loop de leitura do terminal local sem bloquear o cliente do Discord.
+    print('Console local ativo. Use !max ID, !min ID, !status ou !help.')
+
+    while not client.is_closed():
+        try:
+            linha = await asyncio.to_thread(input, 'bot> ')
+        except EOFError:
+            print('Console local encerrado: entrada padrão indisponível.')
+            return
+        except KeyboardInterrupt:
+            print('Console local interrompido.')
+            return
+        except Exception as erro:
+            print(f'Falha ao ler comando do terminal local: {erro}')
+            return
+
+        resposta = interpretar_comando_terminal_local(linha)
+        if resposta:
+            print(resposta)
+
+
 async def tocar_kokusen_no_voz(usuario, canal_texto):
     # Toca kokusen.ogg no canal de voz do usuário e retoma playlist se necessário.
     try:
@@ -927,15 +1013,16 @@ def processar_rolagem_dados(conteudo, usuario_id, usuario_mention):
         texto_adicional_bruto = match2.group(3)
         acao_fate = None
         complemento_fate = None
-        forcagem_teste = None
+        forcagem_rolagem = None
         if num_dice == 4:
             acao_fate, complemento_fate = extrair_acao_e_complemento_fate(texto_adicional_bruto)
             if not acao_fate:
                 return [
                     f"{usuario_mention} em `4df` você precisa escolher uma ação: `Atacar`, `Defender`, `Criar Vantagem` (`vantagem`, `criar`, `cv`) ou `Superar`."
                 ]
-            if usuario_id in usuarios_teste:
-                forcagem_teste, complemento_fate = extrair_forcagem_teste(complemento_fate)
+            forcagem_rolagem = consumir_forcagem_proximo_4df(usuario_id)
+            if forcagem_rolagem is None and usuario_id in usuarios_teste:
+                forcagem_rolagem, complemento_fate = extrair_forcagem_teste(complemento_fate)
 
         texto_adicional = None
         if num_dice == 4:
@@ -944,9 +1031,9 @@ def processar_rolagem_dados(conteudo, usuario_id, usuario_mention):
         elif texto_adicional_bruto:
             texto_adicional = f"→ '{texto_adicional_bruto}'"
 
-        if num_dice == 4 and forcagem_teste == 'max':
+        if num_dice == 4 and forcagem_rolagem == 'max':
             rolls = [1, 1, 1, 1]
-        elif num_dice == 4 and forcagem_teste == 'min':
+        elif num_dice == 4 and forcagem_rolagem == 'min':
             rolls = [-1, -1, -1, -1]
         else:
             rolls = [random.randint(-1, 1) for _ in range(num_dice)]
@@ -974,11 +1061,15 @@ def processar_rolagem_dados(conteudo, usuario_id, usuario_mention):
 @client.event
 async def on_ready():
     # Evento disparado quando o bot conecta; sincroniza comandos slash uma vez.
-    global comandos_sincronizados
+    global comandos_sincronizados, tarefa_console_local
     if not comandos_sincronizados:
         await tree.sync()
         comandos_sincronizados = True
         print('Slash commands sincronizados.')
+
+    if sys.stdin is not None and sys.stdin.isatty() and (tarefa_console_local is None or tarefa_console_local.done()):
+        tarefa_console_local = asyncio.create_task(console_terminal_local())
+
     print(f'We have logged in as {client.user}')
 
 
@@ -1065,6 +1156,8 @@ async def on_message(message):
     comando_ban = re.match(r'^!ban(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_desbanir = re.match(r'^!desbanir(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_teste = re.match(r'^!teste(?:\s+(.*))?$', message.content, re.IGNORECASE)
+    comando_max = re.match(r'^!max(?:\s+(.*))?$', message.content, re.IGNORECASE)
+    comando_min = re.match(r'^!min(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_adm = re.match(r'^!adm(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_luta = re.match(r'^!luta\s*$', message.content, re.IGNORECASE)
     comando_tocar = re.match(r'^!tocar(?:\s+(.*))?$', message.content, re.IGNORECASE)
@@ -1259,6 +1352,22 @@ async def on_message(message):
         else:
             usuarios_teste.add(alvo_id)
             await message.channel.send(f'Modo de teste ativado para `{alvo_id}`. Em `r 4df atacar`, a pessoa pode usar `max`/`min` no fim da mensagem.')
+        return
+
+    # !max / !min: força a próxima rolagem simples de 4df do alvo.
+    if comando_max or comando_min:
+        if not eh_admin(usuario.id):
+            await message.channel.send(f'{usuario.mention} você não tem permissão para usar este comando.')
+            return
+
+        comando_forcagem = comando_max or comando_min
+        tipo_forcagem = 'max' if comando_max else 'min'
+        alvo_id = extrair_id_alvo_texto(message, comando_forcagem.group(1))
+        if not alvo_id:
+            await message.channel.send(f'Use `!{tipo_forcagem} @usuario` ou `!{tipo_forcagem} ID`.')
+            return
+
+        await message.channel.send(registrar_forcagem_proximo_4df(alvo_id, tipo_forcagem))
         return
 
     # !ban: bloqueia usuário para comandos de rolagem.
