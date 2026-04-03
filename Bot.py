@@ -5,6 +5,7 @@ import random
 import re
 import ast
 import os
+from pathlib import Path
 import ssl
 import glob
 import asyncio
@@ -36,6 +37,38 @@ import yt_dlp
 #    - Token do bot deve ser fornecido por variável de ambiente (`DISCORD_BOT_TOKEN`).
 # -----------------------------------------------------------------------------
 
+def carregar_arquivo_env(caminho_env: Path) -> None:
+    for linha in caminho_env.read_text(encoding='utf-8').splitlines():
+        linha_limpa = linha.strip()
+        if not linha_limpa or linha_limpa.startswith('#') or '=' not in linha_limpa:
+            continue
+
+        chave, valor = linha_limpa.split('=', 1)
+        chave = chave.strip().removeprefix('export ').strip()
+        valor = valor.strip()
+
+        if len(valor) >= 2 and valor[0] == valor[-1] and valor[0] in {'"', "'"}:
+            valor = valor[1:-1]
+
+        if chave:
+            os.environ.setdefault(chave, valor)
+
+def carregar_variaveis_ambiente() -> None:
+    caminhos_verificados = set()
+    bases_busca = (Path.cwd().resolve(), Path(__file__).resolve().parent)
+
+    for base in bases_busca:
+        for diretorio in (base, *base.parents):
+            for nome_arquivo in ('.env.local', '.env'):
+                caminho_env = diretorio / nome_arquivo
+                if caminho_env in caminhos_verificados:
+                    continue
+                caminhos_verificados.add(caminho_env)
+
+                if caminho_env.is_file():
+                    carregar_arquivo_env(caminho_env)
+                    return
+
 # Mapeamento dos resultados dos dados Fate para símbolos visuais.
 fate_dice = {-1: '-', 0:'0', 1:'+'}
 
@@ -46,9 +79,29 @@ id_jandei = 332954449918165003
 ids_admin = [316323635470270475]
 
 # Limite máximo aceito para quantidade de dados e lados numéricos.
-LIMITE_VALOR_DADO = 1_000_000
+LIMITE_VALOR_DADO = 1_000
 LIMITE_VALOR_DADO_TEXTO = str(LIMITE_VALOR_DADO)
 PADRAO_TERMO_DADO = re.compile(r'(?<![\w])(\d*)d(f|\d+)(?![\w])', re.IGNORECASE)
+ACOES_FATE_VALIDAS = {
+    'atacar': 'Atacar',
+    'atk': 'Atacar',
+    'defender': 'Defender',
+    'criar vantagem': 'Criar Vantagem',
+    'vantagem': 'Criar Vantagem',
+    'criar': 'Criar Vantagem',
+    'cv': 'Criar Vantagem',
+    'superar': 'Superar',
+    'sup': 'Superar',
+}
+PADRAO_ACAO_FATE = re.compile(
+    r'^('
+    + '|'.join(
+        re.escape(acao).replace(r'\ ', r'\s+')
+        for acao in sorted(ACOES_FATE_VALIDAS, key=len, reverse=True)
+    )
+    + r')(?:\s+(.*))?$',
+    re.IGNORECASE,
+)
 
 # Configuração base do cliente Discord e comandos slash.
 # No macOS, algumas instalações novas de Python não expõem uma cadeia CA confiável ao aiohttp.
@@ -521,13 +574,7 @@ def normalizar_acao_fate(texto):
         return None
 
     texto_limpo = ' '.join(texto.lower().strip().split())
-    acoes_validas = {
-        'atacar': 'Atacar',
-        'defender': 'Defender',
-        'criar vantagem': 'Criar Vantagem',
-        'superar': 'Superar'
-    }
-    return acoes_validas.get(texto_limpo)
+    return ACOES_FATE_VALIDAS.get(texto_limpo)
 
 
 def extrair_acao_e_complemento_fate(texto):
@@ -536,11 +583,7 @@ def extrair_acao_e_complemento_fate(texto):
         return None, None
 
     texto_limpo = ' '.join(texto.strip().split())
-    match_acao = re.match(
-        r'^(criar\s+vantagem|atacar|defender|superar)(?:\s+(.*))?$',
-        texto_limpo,
-        re.IGNORECASE
-    )
+    match_acao = PADRAO_ACAO_FATE.match(texto_limpo)
     if not match_acao:
         return None, None
 
@@ -889,7 +932,7 @@ def processar_rolagem_dados(conteudo, usuario_id, usuario_mention):
             acao_fate, complemento_fate = extrair_acao_e_complemento_fate(texto_adicional_bruto)
             if not acao_fate:
                 return [
-                    f"{usuario_mention} em `4df` você precisa escolher uma ação: `Atacar`, `Defender`, `Criar Vantagem` ou `Superar`."
+                    f"{usuario_mention} em `4df` você precisa escolher uma ação: `Atacar`, `Defender`, `Criar Vantagem` (`vantagem`, `criar`, `cv`) ou `Superar`."
                 ]
             if usuario_id in usuarios_teste:
                 forcagem_teste, complemento_fate = extrair_forcagem_teste(complemento_fate)
@@ -1302,9 +1345,11 @@ async def on_message(message):
         await canal_envio.send('https://tenor.com/view/furry-fursuit-lua-excited-discord-gif-25290457')
         await canal_envio.send(f'Jandei foi citado! "{message.content}". lembrando que Jandei é um furry <@332954449918165003>')
 
-    # Inicialização do bot com token via variável de ambiente.
+carregar_variaveis_ambiente()
+
+# Inicialização do bot com token via variável de ambiente.
 token_bot = os.environ.get('DISCORD_BOT_TOKEN', '').strip()
 if not token_bot:
-    raise RuntimeError('Defina a variável de ambiente DISCORD_BOT_TOKEN antes de iniciar o bot.')
+    raise RuntimeError('Defina DISCORD_BOT_TOKEN no .env.local, .env ou na variável de ambiente antes de iniciar o bot.')
 
 client.run(token_bot)

@@ -42,6 +42,14 @@ pip install -r requirements.txt
 
 O bot lê o token pela variável de ambiente `DISCORD_BOT_TOKEN`.
 
+Por padrão, ele tenta carregar automaticamente um arquivo `.env.local` ou `.env` no diretório atual, na pasta do script e nos diretórios pai.
+
+Arquivo recomendado:
+
+```env
+DISCORD_BOT_TOKEN="SEU_TOKEN_AQUI"
+```
+
 No macOS, o projeto também configura automaticamente o CA bundle do `certifi` para evitar falhas de SSL em instalações do Python que não trazem a cadeia de certificados corretamente.
 
 ### PowerShell (Windows)
@@ -58,7 +66,7 @@ set DISCORD_BOT_TOKEN=SEU_TOKEN_AQUI
 python Bot.py
 ```
 
-Se a variável não estiver definida, o bot encerra com erro.
+Se nenhuma dessas opções estiver definida, o bot encerra com erro.
 
 ---
 
@@ -75,7 +83,7 @@ No Windows, o bot tenta encontrar o `ffmpeg.exe` automaticamente em caminhos com
 ## Comandos Slash
 
 - `/roll expressao:<texto>`
-	- Exemplos: `d20+5`, `2d6`, `4df atacar`, `4df criar vantagem distração`
+	- Exemplos: `d20+5`, `2d6`, `4df atacar`, `4df criar vantagem distração`, `4df cv distração`
 - `/tema link:<url>`
 	- Define seu tema para tocar quando você tirar `++++` em `4df`
 - `/ban` (admin)
@@ -146,6 +154,8 @@ Exemplos:
 - `4df atacar`
 - `4df defender escudo`
 - `4df criar vantagem terreno alto`
+- `4df vantagem terreno alto`
+- `4df cv terreno alto`
 - `r 23*73/4df+87`
 
 ### Regra especial para `4df`
@@ -154,7 +164,7 @@ Quando for uma rolagem simples de `4df`, **é obrigatório informar a ação**:
 
 - `Atacar`
 - `Defender`
-- `Criar Vantagem`
+- `Criar Vantagem` também aceita `vantagem`, `criar` e `cv`
 - `Superar`
 
 Se a ação não for informada, o bot avisa e não rola.
@@ -209,7 +219,7 @@ Qualquer tentativa de usar quantidade de dados ou número de lados acima de `100
 
 ## Execução
 
-Depois de configurar o token:
+Depois de criar o `.env.local` ou configurar a variável manualmente:
 
 ```bash
 python Bot.py
