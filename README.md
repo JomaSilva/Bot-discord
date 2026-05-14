@@ -106,10 +106,12 @@ No Windows, o bot tenta encontrar o `ffmpeg.exe` automaticamente em caminhos com
 	- Registra sua escala com número maior ou igual a zero
 - `!duelo @usuario1 @usuario2 ...` ou `!duelo ID1 ID2 ...`
 	- Define o duelo ativo da guild para aplicar bônus de escala em rolagens Fate
+- `!fimduelo`
+	- Encerra o duelo ativo da guild e remove seus participantes
 - `!noact`
-	- Desativa, só para você, a obrigatoriedade de informar ação em rolagens simples de `4df`
+	- Comando legado; `4df` já aceita rolagem sem ação por padrão
 - `!act`
-	- Reativa a obrigatoriedade de informar ação em rolagens simples de `4df`
+	- Comando legado; o bot não exige mais ação em `4df`
 - `!luta`
 	- Entra (ou move) para seu canal de voz e inicia a playlist de luta
 - `!adm @usuario` ou `!adm ID` (admin)
@@ -177,16 +179,12 @@ Exemplos:
 
 ### Regra especial para `4df`
 
-Quando for uma rolagem simples de `4df`, **por padrão é obrigatório informar a ação**:
+Quando for uma rolagem simples de `4df`, informar a ação é **opcional**. Se quiser, você ainda pode usar:
 
 - `Atacar`
 - `Defender`
 - `Criar Vantagem` também aceita `vantagem`, `criar` e `cv`
 - `Superar`
-
-Se a ação não for informada, o bot avisa e não rola.
-
-Se você quiser remover essa exigência para a sua conta, use `!noact`. Depois, se quiser voltar ao comportamento padrão, use `!act`.
 
 Em expressões matemáticas maiores, como `r 1d20+4df+3d6` ou `r 23*73/4df+87`, o `4df` é tratado como um termo numérico normal da expressão.
 
@@ -200,6 +198,7 @@ Exemplos:
 
 - `!escala 2`
 - `!duelo @jogador1 @jogador2 @jogador3`
+- `!fimduelo`
 - `4df atacar noscale`
 - `r 4df defender noscale`
 

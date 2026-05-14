@@ -21,7 +21,7 @@ import yt_dlp
 # VISÃO GERAL DO BOT (handoff para outro dev)
 #
 # 1) Entradas suportadas:
-#    - Comandos de texto: !luta, !tocar, !skipar, !parar, !tema, !invencivel, !escala, !duelo, !noact, !act, !ban, !desbanir, !adm, !teste, !max, !min
+#    - Comandos de texto: !luta, !tocar, !skipar, !parar, !tema, !invencivel, !escala, !duelo, !fimduelo, !noact, !act, !ban, !desbanir, !adm, !teste, !max, !min
 #    - Comandos slash: /roll, /tema, /ban, /desbanir
 #    - Mensagens de rolagem: dN e df (ex.: d20+3, 4df atacar)
 #
@@ -77,7 +77,6 @@ fate_dice = {-1: '-', 0:'0', 1:'+'}
 # Listas/estruturas de controle de usuários e permissões.
 usuarios_banidos = [190954369917779968]
 usuarios_teste = set()
-usuarios_sem_acao_fate = set()
 id_jandei = 332954449918165003
 ids_admin = [316323635470270475]
 
@@ -1198,12 +1197,7 @@ def processar_rolagem_dados(conteudo, usuario_id, usuario_mention, guild_id=None
         if num_dice == 4:
             acao_fate, complemento_fate = extrair_acao_e_complemento_fate(texto_adicional_bruto)
             if not acao_fate:
-                if usuario_id in usuarios_sem_acao_fate:
-                    complemento_fate = (texto_adicional_bruto or '').strip() or None
-                else:
-                    return [
-                        f"{usuario_mention} em `4df` você precisa escolher uma ação: `Atacar`, `Defender`, `Criar Vantagem` (`vantagem`, `criar`, `cv`) ou `Superar`. Use `!noact` se quiser desabilitar essa exigência para você."
-                    ]
+                complemento_fate = (texto_adicional_bruto or '').strip() or None
             forcagem_rolagem = consumir_forcagem_proximo_4df(usuario_id)
             if forcagem_rolagem is None and usuario_id in usuarios_teste:
                 forcagem_rolagem, complemento_fate = extrair_forcagem_teste(complemento_fate)
@@ -1369,27 +1363,20 @@ async def on_message(message):
     comando_invencivel = re.match(r'^!invencivel\s*$', message.content, re.IGNORECASE)
     comando_escala = re.match(r'^!escala(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_duelo = re.match(r'^!duelo(?:\s+(.*))?$', message.content, re.IGNORECASE)
+    comando_fimduelo = re.match(r'^!fimduelo\s*$', message.content, re.IGNORECASE)
     comando_luta = re.match(r'^!luta\s*$', message.content, re.IGNORECASE)
     comando_tocar = re.match(r'^!tocar(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_skipar = re.match(r'^!skipar\s*$', message.content, re.IGNORECASE)
     comando_parar = re.match(r'^!parar\s*$', message.content, re.IGNORECASE)
     comando_tema = re.match(r'^!tema(?:\s+(.*))?$', message.content, re.IGNORECASE)
 
-    # !noact / !act: alternam a obrigatoriedade de ação em rolagens simples de 4df para o próprio usuário.
+    # !noact / !act: mantidos por compatibilidade, mas `4df` agora já aceita ação opcional por padrão.
     if comando_noact:
-        if usuario.id in usuarios_sem_acao_fate:
-            await message.channel.send(f'{usuario.mention} a obrigatoriedade de ação em `4df` já está desativada para você.')
-        else:
-            usuarios_sem_acao_fate.add(usuario.id)
-            await message.channel.send(f'{usuario.mention} agora você pode usar `4df` sem informar ação. Use `!act` para reativar essa exigência.')
+        await message.channel.send(f'{usuario.mention} `4df` já funciona sem ação por padrão. Se quiser, ainda pode detalhar a ação normalmente.')
         return
 
     if comando_act:
-        if usuario.id not in usuarios_sem_acao_fate:
-            await message.channel.send(f'{usuario.mention} a obrigatoriedade de ação em `4df` já está ativa para você.')
-        else:
-            usuarios_sem_acao_fate.remove(usuario.id)
-            await message.channel.send(f'{usuario.mention} a obrigatoriedade de ação em `4df` foi reativada.')
+        await message.channel.send(f'{usuario.mention} a ação em `4df` não é mais obrigatória no bot. Se quiser informar, o bot continua aceitando.')
         return
 
     if comando_invencivel:
@@ -1433,6 +1420,17 @@ async def on_message(message):
 
         duelos_ativos[message.guild.id] = ids_alvo
         await message.channel.send(f'Duelo registrado. {descrever_duelo_ativo(message.guild.id)}')
+        return
+
+    if comando_fimduelo:
+        if message.guild is None:
+            await message.channel.send('O comando `!fimduelo` só pode ser usado dentro de um servidor.')
+            return
+
+        if duelos_ativos.pop(message.guild.id, None) is None:
+            await message.channel.send('Não há duelo ativo para encerrar nesta guild.')
+        else:
+            await message.channel.send('Duelo encerrado. Os participantes foram removidos do duelo ativo.')
         return
 
     # !tema: salva tema personalizado por usuário.
