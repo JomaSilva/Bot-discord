@@ -153,7 +153,7 @@ TEMAS_MAIS_QUATRO = {
     },
     'invencivel': {
         'nome': 'Invencível',
-        'frase_efeito': 'Invencível!',
+        'frase_efeito': 'ele é...',
         'gif_efeito': 'https://tenor.com/view/invulnerable-gif-22484955',
         'audio_local': 'invencivel.ogg',
         'acao_necessaria': None,
