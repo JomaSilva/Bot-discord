@@ -7,6 +7,8 @@ Bot para Discord com:
 - rolagens Fate (`df`, incluindo regra especial para `4df`)
 - cálculo matemático seguro com `r <expressão>`
 - tema musical por usuário no `++++`
+- troca do efeito especial de `++++` para o modo Invencível com `!invencivel`
+- escala por usuário com `!escala` e bônus automático de duelo Fate com `!duelo`
 - playlist de luta no canal de voz (`!luta`)
 - comandos administrativos de ban/desban e permissões
 
@@ -74,6 +76,7 @@ Se nenhuma dessas opções estiver definida, o bot encerra com erro.
 
 - O bot usa FFmpeg para tocar áudio em voz.
 - O arquivo local `kokusen.ogg` é usado em eventos específicos de `4df`.
+- O arquivo local `invencivel.ogg` é usado quando o modo `!invencivel` está ativo.
 - O comando `!luta` carrega uma playlist fixa do YouTube Music e toca em fila.
 
 No Windows, o bot tenta encontrar o `ffmpeg.exe` automaticamente em caminhos comuns (incluindo instalação via Winget). Se não encontrar, usa `ffmpeg` no `PATH`.
@@ -97,6 +100,16 @@ No Windows, o bot tenta encontrar o `ffmpeg.exe` automaticamente em caminhos com
 
 - `!tema <link>`
 	- Salva tema personalizado do usuário
+- `!invencivel`
+	- Troca o efeito especial de `++++` para o modo Invencível
+- `!escala <valor>`
+	- Registra sua escala com número maior ou igual a zero
+- `!duelo @usuario1 @usuario2 ...` ou `!duelo ID1 ID2 ...`
+	- Define o duelo ativo da guild para aplicar bônus de escala em rolagens Fate
+- `!noact`
+	- Desativa, só para você, a obrigatoriedade de informar ação em rolagens simples de `4df`
+- `!act`
+	- Reativa a obrigatoriedade de informar ação em rolagens simples de `4df`
 - `!luta`
 	- Entra (ou move) para seu canal de voz e inicia a playlist de luta
 - `!adm @usuario` ou `!adm ID` (admin)
@@ -164,7 +177,7 @@ Exemplos:
 
 ### Regra especial para `4df`
 
-Quando for uma rolagem simples de `4df`, **é obrigatório informar a ação**:
+Quando for uma rolagem simples de `4df`, **por padrão é obrigatório informar a ação**:
 
 - `Atacar`
 - `Defender`
@@ -173,7 +186,22 @@ Quando for uma rolagem simples de `4df`, **é obrigatório informar a ação**:
 
 Se a ação não for informada, o bot avisa e não rola.
 
+Se você quiser remover essa exigência para a sua conta, use `!noact`. Depois, se quiser voltar ao comportamento padrão, use `!act`.
+
 Em expressões matemáticas maiores, como `r 1d20+4df+3d6` ou `r 23*73/4df+87`, o `4df` é tratado como um termo numérico normal da expressão.
+
+Quando o modo `!invencivel` está ativo, qualquer resultado `++++` em `4df` envia o GIF do Invencível e toca `invencivel.ogg`.
+
+Em rolagens Fate simples, se houver um duelo ativo via `!duelo`, o bot compara a escala registrada dos participantes e soma `+2` no total para cada ponto de diferença acima da menor escala do duelo.
+
+Se quiser ignorar esse bônus em uma rolagem específica de Fate, adicione `noscale` ao final da rolagem.
+
+Exemplos:
+
+- `!escala 2`
+- `!duelo @jogador1 @jogador2 @jogador3`
+- `4df atacar noscale`
+- `r 4df defender noscale`
 
 ---
 

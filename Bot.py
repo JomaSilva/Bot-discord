@@ -11,6 +11,7 @@ import glob
 import asyncio
 import shutil
 import sys
+import math
 from typing import Any, cast
 import aiohttp.connector
 import certifi
@@ -20,7 +21,7 @@ import yt_dlp
 # VISÃO GERAL DO BOT (handoff para outro dev)
 #
 # 1) Entradas suportadas:
-#    - Comandos de texto: !luta, !tocar, !skipar, !parar, !tema, !ban, !desbanir, !adm, !teste, !max, !min
+#    - Comandos de texto: !luta, !tocar, !skipar, !parar, !tema, !invencivel, !escala, !duelo, !noact, !act, !ban, !desbanir, !adm, !teste, !max, !min
 #    - Comandos slash: /roll, /tema, /ban, /desbanir
 #    - Mensagens de rolagem: dN e df (ex.: d20+3, 4df atacar)
 #
@@ -76,6 +77,7 @@ fate_dice = {-1: '-', 0:'0', 1:'+'}
 # Listas/estruturas de controle de usuários e permissões.
 usuarios_banidos = [190954369917779968]
 usuarios_teste = set()
+usuarios_sem_acao_fate = set()
 id_jandei = 332954449918165003
 ids_admin = [316323635470270475]
 
@@ -132,9 +134,76 @@ canal_texto_reproducao = {}
 # Tema personalizado de cada usuário para ativação no ++++.
 temas_usuario = {}
 
+# Escalas registradas por usuário e duelo ativo por guild.
+escalas_usuario = {}
+duelos_ativos = {}
+
 # Forçagens administrativas para a próxima rolagem simples de 4df por usuário.
 forcagens_proximo_4df = {}
 tarefa_console_local = None
+tema_mais_quatro_atual = 'jujutsu'
+
+TEMAS_MAIS_QUATRO = {
+    'jujutsu': {
+        'nome': 'Jujutsu',
+        'frase_efeito': 'Black Flash!',
+        'gif_efeito': 'https://tenor.com/view/jjk-jjk-s2-jjk-season-2-jujutsu-kaisen-jujutsu-kaisen-s2-gif-7964484372484357392',
+        'audio_local': 'kokusen.ogg',
+        'acao_necessaria': 'Atacar',
+    },
+    'invencivel': {
+        'nome': 'Invencível',
+        'frase_efeito': 'Invencível!',
+        'gif_efeito': 'https://tenor.com/view/invulnerable-gif-22484955',
+        'audio_local': 'invencivel.ogg',
+        'acao_necessaria': None,
+    },
+}
+
+
+def obter_config_tema_mais_quatro():
+    # Devolve a configuração ativa do efeito especial de `++++`.
+    return TEMAS_MAIS_QUATRO[tema_mais_quatro_atual]
+
+
+def ativar_tema_invencivel():
+    # Alterna o efeito especial de `++++` para o modo Invencível.
+    global tema_mais_quatro_atual
+    if tema_mais_quatro_atual == 'invencivel':
+        return False
+
+    tema_mais_quatro_atual = 'invencivel'
+    return True
+
+
+def deve_ativar_efeito_mais_quatro(teve_mais_quatro, acao_fate):
+    # Decide se o efeito especial do `++++` deve disparar no tema ativo.
+    if not teve_mais_quatro:
+        return False
+
+    acao_necessaria = obter_config_tema_mais_quatro()['acao_necessaria']
+    return acao_necessaria is None or acao_fate == acao_necessaria
+
+
+def montar_mensagem_rolagem_fate(usuario_mention, dados_organizados, mod_display, total_fate, escala, acao_fate, texto_adicional, bonus_duelo=0, participante_duelo=False, ignorou_bonus_escala=False):
+    # Centraliza a linha principal exibida para rolagens Fate.
+    partes = [
+        f'{usuario_mention} rolled: [{dados_organizados}]{mod_display} (**Total: {formatar_numero_resultado(total_fate)}**)',
+        f'Escala: **{escala}**',
+    ]
+
+    if participante_duelo:
+        if ignorou_bonus_escala:
+            partes.append('Bônus de Escala: **ignorado com `noscale`**')
+        else:
+            partes.append(f'Bônus de Escala: **{formatar_numero_com_sinal(bonus_duelo)}**')
+
+    if acao_fate:
+        partes.append(f'Ação: **{acao_fate}**')
+    if texto_adicional:
+        partes.append(texto_adicional)
+
+    return ' | '.join(partes)
 
 
 def cancelar_playlist_luta(guild_id):
@@ -376,6 +445,29 @@ def formatar_numero_resultado(valor):
     return str(valor)
 
 
+def formatar_numero_com_sinal(valor):
+    # Formata números com sinal explícito quando positivos.
+    texto = formatar_numero_resultado(valor)
+    if valor > 0:
+        return f'+{texto}'
+    return texto
+
+
+def interpretar_valor_escala(texto):
+    # Aceita escala numérica não negativa usando ponto ou vírgula decimal.
+    texto_limpo = ' '.join((texto or '').strip().split()).replace(',', '.')
+    if not texto_limpo:
+        raise ValueError('Use `!escala <valor>` com um número maior ou igual a zero.')
+
+    valor = float(texto_limpo)
+    if not math.isfinite(valor) or valor < 0:
+        raise ValueError('A escala precisa ser um número maior ou igual a zero.')
+
+    if valor.is_integer():
+        return int(valor)
+    return valor
+
+
 def mensagens_usuario_banido(usuario_mention):
     # Centraliza a resposta enviada para usuários bloqueados.
     return [
@@ -505,7 +597,8 @@ def extrair_metadados_rolagem(conteudo, mensagens):
     match_fate = re.match(r'^(\d*)df((?:\s*[+-]\s*\d+)*)(?:\s+(.*))?$', conteudo.strip(), re.IGNORECASE)
     acao_fate = None
     if match_fate and (int(match_fate.group(1)) if match_fate.group(1) else 1) == 4:
-        acao_fate, _complemento = extrair_acao_e_complemento_fate(match_fate.group(3))
+        _ignorar_bonus_escala, texto_tratado = extrair_flag_noscale(match_fate.group(3))
+        acao_fate, _complemento = extrair_acao_e_complemento_fate(texto_tratado)
 
     return {
         'acao_fate': acao_fate,
@@ -513,7 +606,7 @@ def extrair_metadados_rolagem(conteudo, mensagens):
     }
 
 
-def processar_entrada_rolagem(conteudo, usuario_id, usuario_mention, prefixo='r ', permitir_expressao_com_dados=True):
+def processar_entrada_rolagem(conteudo, usuario_id, usuario_mention, prefixo='r ', permitir_expressao_com_dados=True, guild_id=None):
     # Decide entre rolagem simples (d20/4df) e expressão mista com dados embutidos.
     conteudo = conteudo.strip()
     if not conteudo:
@@ -526,7 +619,7 @@ def processar_entrada_rolagem(conteudo, usuario_id, usuario_mention, prefixo='r 
     if mensagens_limite:
         return mensagens_limite, None
 
-    mensagens = processar_rolagem_dados(conteudo, usuario_id, usuario_mention)
+    mensagens = processar_rolagem_dados(conteudo, usuario_id, usuario_mention, guild_id=guild_id)
     if mensagens:
         return mensagens, extrair_metadados_rolagem(conteudo, mensagens)
 
@@ -547,29 +640,29 @@ def escala_adjetivos_jjk(total):
     # Converte o total Fate em uma escala adjetiva inspirada em JJK.
     if total >= 9:
         return 'Inominável'
-    if total == 8:
+    if total >= 8:
         return 'Lendário'
-    if total == 7:
+    if total >= 7:
         return 'Épico'
-    if total == 6:
+    if total >= 6:
         return 'Fantástico'
-    if total == 5:
+    if total >= 5:
         return 'Excepcional'
-    if total == 4:
+    if total >= 4:
         return 'Ótimo'
-    if total == 3:
+    if total >= 3:
         return 'Bom'
-    if total == 2:
+    if total >= 2:
         return 'Razoável'
-    if total == 1:
+    if total >= 1:
         return 'Regular'
-    if total == 0:
+    if total >= 0:
         return 'Medíocre'
-    if total == -1:
+    if total >= -1:
         return 'Ruim'
-    if total == -2:
+    if total >= -2:
         return 'Terrível'
-    if total == -3:
+    if total >= -3:
         return 'Catastrófico'
     return 'Horrível'
 
@@ -619,6 +712,23 @@ def extrair_forcagem_teste(texto):
     return None, texto_limpo
 
 
+def extrair_flag_noscale(texto):
+    # Remove o token `noscale` do texto adicional de rolagens Fate.
+    if not texto:
+        return False, ''
+
+    tokens = ' '.join(texto.strip().split()).split(' ')
+    ignorar_escala = False
+    tokens_restantes = []
+    for token in tokens:
+        if token.lower().strip() == 'noscale':
+            ignorar_escala = True
+            continue
+        tokens_restantes.append(token)
+
+    return ignorar_escala, ' '.join(tokens_restantes).strip()
+
+
 def extrair_id_de_texto(texto):
     # Extrai um ID numérico de Discord de um texto livre.
     if not texto:
@@ -629,6 +739,13 @@ def extrair_id_de_texto(texto):
     return int(id_match.group(0))
 
 
+def extrair_ids_de_texto(texto):
+    # Extrai múltiplos IDs numéricos de Discord de um texto livre.
+    if not texto:
+        return []
+    return [int(item) for item in re.findall(r'\d{15,20}', texto)]
+
+
 def extrair_id_alvo_texto(message, argumento):
     # Resolve alvo de comando por menção ou ID em comando de texto.
     if message.mentions:
@@ -636,11 +753,57 @@ def extrair_id_alvo_texto(message, argumento):
     return extrair_id_de_texto(argumento)
 
 
+def extrair_ids_alvos_texto(message, argumento):
+    # Resolve múltiplos alvos por menções e/ou IDs em comando de texto.
+    ids_alvo = [mencionado.id for mencionado in message.mentions]
+    ids_alvo.extend(extrair_ids_de_texto(argumento))
+    return list(dict.fromkeys(ids_alvo))
+
+
 def extrair_id_alvo_slash(usuario, usuario_id):
     # Resolve alvo de comando slash por usuário selecionado ou ID informado.
     if usuario is not None:
         return usuario.id
     return extrair_id_de_texto(usuario_id)
+
+
+def obter_escala_usuario(usuario_id):
+    # Escala padrão é zero quando o usuário ainda não configurou valor.
+    return escalas_usuario.get(usuario_id, 0)
+
+
+def calcular_bonus_duelo_fate(guild_id, usuario_id, ignorar_bonus_escala=False):
+    # Calcula o bônus Fate vindo da diferença para a menor escala do duelo ativo.
+    if guild_id is None:
+        return 0, False
+
+    participantes = duelos_ativos.get(guild_id)
+    if not participantes or len(participantes) < 2 or usuario_id not in participantes:
+        return 0, False
+
+    if ignorar_bonus_escala:
+        return 0, True
+
+    menor_escala = min(obter_escala_usuario(participante_id) for participante_id in participantes)
+    bonus = (obter_escala_usuario(usuario_id) - menor_escala) * 2
+    return bonus, True
+
+
+def descrever_duelo_ativo(guild_id):
+    # Resume o duelo ativo da guild com as escalas e bônus atuais.
+    participantes = duelos_ativos.get(guild_id)
+    if not participantes or len(participantes) < 2:
+        return 'Nenhum duelo ativo nesta guild.'
+
+    partes = []
+    for participante_id in participantes:
+        escala = obter_escala_usuario(participante_id)
+        bonus, _participa = calcular_bonus_duelo_fate(guild_id, participante_id)
+        partes.append(
+            f'`{participante_id}`: escala `{formatar_numero_resultado(escala)}` / bônus `{formatar_numero_com_sinal(bonus)}`'
+        )
+
+    return 'Duelo ativo: ' + ', '.join(partes)
 
 
 def eh_admin(usuario_id):
@@ -728,8 +891,8 @@ async def console_terminal_local():
             print(resposta)
 
 
-async def tocar_kokusen_no_voz(usuario, canal_texto):
-    # Toca kokusen.ogg no canal de voz do usuário e retoma playlist se necessário.
+async def tocar_audio_local_no_voz(usuario, canal_texto, nome_arquivo):
+    # Toca um arquivo de áudio local do projeto no canal de voz do usuário.
     try:
         guild = canal_texto.guild
         if guild is None:
@@ -748,14 +911,14 @@ async def tocar_kokusen_no_voz(usuario, canal_texto):
         canal_voz = membro.voice.channel
         voice_client = guild.voice_client
 
-        # Se a playlist estiver tocando, prepara retomada depois que o kokusen terminar.
+        # Se a playlist estiver tocando, prepara retomada depois que o áudio especial terminar.
         interrompeu_playlist = preparar_interrupcao_playlist(guild.id, voice_client)
 
         voice_client = await conectar_ao_canal_voz(guild, canal_voz)
 
-        caminho_audio = os.path.join(os.path.dirname(__file__), 'kokusen.ogg')
+        caminho_audio = os.path.join(os.path.dirname(__file__), nome_arquivo)
         if not os.path.isfile(caminho_audio):
-            await canal_texto.send('Arquivo `kokusen.ogg` não encontrado.')
+            await canal_texto.send(f'Arquivo `{nome_arquivo}` não encontrado.')
             return
 
         if voice_client.is_playing():
@@ -764,7 +927,7 @@ async def tocar_kokusen_no_voz(usuario, canal_texto):
 
         def ao_terminar(erro):
             if erro:
-                print(f'Erro ao tocar kokusen.ogg: {erro}')
+                print(f'Erro ao tocar {nome_arquivo}: {erro}')
             if interrompeu_playlist:
                 client.loop.call_soon_threadsafe(asyncio.create_task, retomar_playlist_interrompida(guild.id, canal_texto))
 
@@ -773,7 +936,17 @@ async def tocar_kokusen_no_voz(usuario, canal_texto):
             after=ao_terminar
         )
     except Exception as erro:
-        await canal_texto.send(f'Não consegui tocar `kokusen.ogg` no canal de voz. Erro: `{erro}`')
+        await canal_texto.send(f'Não consegui tocar `{nome_arquivo}` no canal de voz. Erro: `{erro}`')
+
+
+async def tocar_kokusen_no_voz(usuario, canal_texto):
+    # Toca kokusen.ogg no canal de voz do usuário.
+    await tocar_audio_local_no_voz(usuario, canal_texto, 'kokusen.ogg')
+
+
+async def tocar_invencivel_no_voz(usuario, canal_texto):
+    # Toca invencivel.ogg no canal de voz do usuário.
+    await tocar_audio_local_no_voz(usuario, canal_texto, 'invencivel.ogg')
 
 
 async def tocar_audio_url_no_voz(usuario, canal_texto, audio_url):
@@ -830,7 +1003,11 @@ async def tocar_audio_url_no_voz(usuario, canal_texto, audio_url):
 
 
 async def tocar_audio_ao_mais_quatro(usuario, canal_texto, acao_fate):
-    # No ++++, toca tema do usuário; sem tema, toca kokusen apenas em Atacar.
+    # No ++++, toca o efeito configurado para o tema ativo.
+    if tema_mais_quatro_atual == 'invencivel':
+        await tocar_invencivel_no_voz(usuario, canal_texto)
+        return
+
     tema_link = temas_usuario.get(usuario.id)
     if tema_link:
         await tocar_audio_url_no_voz(usuario, canal_texto, tema_link)
@@ -972,7 +1149,7 @@ async def tocar_proxima_da_fila(guild_id, canal_texto):
             await tocar_proxima_da_fila(guild_id, canal_texto)
 
 
-def processar_rolagem_dados(conteudo, usuario_id, usuario_mention):
+def processar_rolagem_dados(conteudo, usuario_id, usuario_mention, guild_id=None):
     # Processa expressões de rolagem d/df e retorna mensagens prontas para envio.
     # `match` cobre dados comuns (d20, 2d6+3 etc.).
     match = re.match(r'^(\d*)d(\d+)((?:\s*[+-]\s*\d+)*)(?:\s+(.*))?$', conteudo, re.IGNORECASE)
@@ -1011,15 +1188,22 @@ def processar_rolagem_dados(conteudo, usuario_id, usuario_mention):
             mod_display = ''.join(f'{sinal}{valor}' for sinal, valor in mods_encontrados)
 
         texto_adicional_bruto = match2.group(3)
+        ignorar_bonus_escala = False
+        if texto_adicional_bruto:
+            ignorar_bonus_escala, texto_adicional_bruto = extrair_flag_noscale(texto_adicional_bruto)
+
         acao_fate = None
         complemento_fate = None
         forcagem_rolagem = None
         if num_dice == 4:
             acao_fate, complemento_fate = extrair_acao_e_complemento_fate(texto_adicional_bruto)
             if not acao_fate:
-                return [
-                    f"{usuario_mention} em `4df` você precisa escolher uma ação: `Atacar`, `Defender`, `Criar Vantagem` (`vantagem`, `criar`, `cv`) ou `Superar`."
-                ]
+                if usuario_id in usuarios_sem_acao_fate:
+                    complemento_fate = (texto_adicional_bruto or '').strip() or None
+                else:
+                    return [
+                        f"{usuario_mention} em `4df` você precisa escolher uma ação: `Atacar`, `Defender`, `Criar Vantagem` (`vantagem`, `criar`, `cv`) ou `Superar`. Use `!noact` se quiser desabilitar essa exigência para você."
+                    ]
             forcagem_rolagem = consumir_forcagem_proximo_4df(usuario_id)
             if forcagem_rolagem is None and usuario_id in usuarios_teste:
                 forcagem_rolagem, complemento_fate = extrair_forcagem_teste(complemento_fate)
@@ -1039,22 +1223,37 @@ def processar_rolagem_dados(conteudo, usuario_id, usuario_mention):
             rolls = [random.randint(-1, 1) for _ in range(num_dice)]
         rolls_fate = [fate_dice[i] for i in rolls]
         dados_organizados = ', '.join(rolls_fate)
-        total_fate = sum(rolls) + bonus
+        bonus_duelo, participante_duelo = calcular_bonus_duelo_fate(guild_id, usuario_id, ignorar_bonus_escala)
+        total_fate = sum(rolls) + bonus + bonus_duelo
         escala = escala_adjetivos_jjk(total_fate)
 
         mensagens = []
-        if rolls_fate == ['+','+','+','+'] and acao_fate == 'Atacar':
-            mensagens.append('Black Flash!')
-            mensagens.append('https://tenor.com/view/jjk-jjk-s2-jjk-season-2-jujutsu-kaisen-jujutsu-kaisen-s2-gif-7964484372484357392')
-            mensagens.append(f"{usuario_mention} rolled: [**{dados_organizados}**]{mod_display} (**Total: {total_fate}**) | Escala: **{escala}** {f'| Ação: **{acao_fate}** ' if acao_fate else ''}{texto_adicional if texto_adicional else ''}")
+        mensagem_principal = montar_mensagem_rolagem_fate(
+            usuario_mention,
+            dados_organizados,
+            mod_display,
+            total_fate,
+            escala,
+            acao_fate,
+            texto_adicional,
+            bonus_duelo=bonus_duelo,
+            participante_duelo=participante_duelo,
+            ignorou_bonus_escala=ignorar_bonus_escala and participante_duelo,
+        )
+
+        if deve_ativar_efeito_mais_quatro(rolls_fate == ['+','+','+','+'], acao_fate):
+            config_tema = obter_config_tema_mais_quatro()
+            mensagens.append(config_tema['frase_efeito'])
+            mensagens.append(config_tema['gif_efeito'])
+            mensagens.append(mensagem_principal.replace(f'[{dados_organizados}]', f'[**{dados_organizados}**]', 1))
             return mensagens
 
         if rolls_fate == ['-','-','-','-']:
-            mensagens.append(f"{usuario_mention} rolled: [**{dados_organizados}**]{mod_display} (**Total: {total_fate}**) | Escala: **{escala}** {f'| Ação: **{acao_fate}** ' if acao_fate else ''}{texto_adicional if texto_adicional else ''} ")
+            mensagens.append(mensagem_principal.replace(f'[{dados_organizados}]', f'[**{dados_organizados}**]', 1))
             mensagens.append('https://cdn.discordapp.com/attachments/1264409229150785609/1451361408028639316/a5z6jq.gif?ex=698f1064&is=698dbee4&hm=a1ecc438a4c2434f9ea70349dd156d6ac2d7c5197ce7dc0b801974d462b55fb5')
             return mensagens
 
-        return [f"{usuario_mention} rolled: [{dados_organizados}]{mod_display} (**Total: {total_fate}**) | Escala: **{escala}** {f'| Ação: **{acao_fate}** ' if acao_fate else ''}{texto_adicional if texto_adicional else ''} "]
+        return [mensagem_principal]
 
     return None
 
@@ -1077,7 +1276,13 @@ async def on_ready():
 @app_commands.describe(expressao='Ex: d20+5, 4df atacar banana, 1d20+4df+3d6')
 async def roll_slash(interaction: discord.Interaction, expressao: str):
     # Comando /roll: aceita rolagens simples e expressões com múltiplos tipos de dado.
-    mensagens, metadados = processar_entrada_rolagem(expressao, interaction.user.id, interaction.user.mention, prefixo='')
+    mensagens, metadados = processar_entrada_rolagem(
+        expressao,
+        interaction.user.id,
+        interaction.user.mention,
+        prefixo='',
+        guild_id=interaction.guild_id,
+    )
     if not mensagens:
         await interaction.response.send_message('Expressão inválida. Use exemplos: `d20+5`, `4df atacar` ou `1d20+4df+3d6`')
         return
@@ -1087,7 +1292,7 @@ async def roll_slash(interaction: discord.Interaction, expressao: str):
         await interaction.followup.send(msg)
 
     if interaction.channel is not None and metadados:
-        if metadados['teve_mais_quatro'] and metadados['acao_fate'] in ('Atacar', 'Defender', 'Criar Vantagem', 'Superar'):
+        if deve_ativar_efeito_mais_quatro(metadados['teve_mais_quatro'], metadados['acao_fate']):
             await tocar_audio_ao_mais_quatro(interaction.user, interaction.channel, metadados['acao_fate'])
 
 
@@ -1159,11 +1364,76 @@ async def on_message(message):
     comando_max = re.match(r'^!max(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_min = re.match(r'^!min(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_adm = re.match(r'^!adm(?:\s+(.*))?$', message.content, re.IGNORECASE)
+    comando_noact = re.match(r'^!noact\s*$', message.content, re.IGNORECASE)
+    comando_act = re.match(r'^!act\s*$', message.content, re.IGNORECASE)
+    comando_invencivel = re.match(r'^!invencivel\s*$', message.content, re.IGNORECASE)
+    comando_escala = re.match(r'^!escala(?:\s+(.*))?$', message.content, re.IGNORECASE)
+    comando_duelo = re.match(r'^!duelo(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_luta = re.match(r'^!luta\s*$', message.content, re.IGNORECASE)
     comando_tocar = re.match(r'^!tocar(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_skipar = re.match(r'^!skipar\s*$', message.content, re.IGNORECASE)
     comando_parar = re.match(r'^!parar\s*$', message.content, re.IGNORECASE)
     comando_tema = re.match(r'^!tema(?:\s+(.*))?$', message.content, re.IGNORECASE)
+
+    # !noact / !act: alternam a obrigatoriedade de ação em rolagens simples de 4df para o próprio usuário.
+    if comando_noact:
+        if usuario.id in usuarios_sem_acao_fate:
+            await message.channel.send(f'{usuario.mention} a obrigatoriedade de ação em `4df` já está desativada para você.')
+        else:
+            usuarios_sem_acao_fate.add(usuario.id)
+            await message.channel.send(f'{usuario.mention} agora você pode usar `4df` sem informar ação. Use `!act` para reativar essa exigência.')
+        return
+
+    if comando_act:
+        if usuario.id not in usuarios_sem_acao_fate:
+            await message.channel.send(f'{usuario.mention} a obrigatoriedade de ação em `4df` já está ativa para você.')
+        else:
+            usuarios_sem_acao_fate.remove(usuario.id)
+            await message.channel.send(f'{usuario.mention} a obrigatoriedade de ação em `4df` foi reativada.')
+        return
+
+    if comando_invencivel:
+        if ativar_tema_invencivel():
+            await message.channel.send('Tema de `++++` alterado para **Invencível**. Agora qualquer `++++` envia o GIF do Invencível e toca `invencivel.ogg`.')
+        else:
+            await message.channel.send('O tema de `++++` já está em **Invencível**.')
+        return
+
+    if comando_escala:
+        argumento_escala = (comando_escala.group(1) or '').strip()
+        if not argumento_escala:
+            await message.channel.send(
+                f'{usuario.mention} sua escala atual é `{formatar_numero_resultado(obter_escala_usuario(usuario.id))}`. Use `!escala <valor>` para alterar.'
+            )
+            return
+
+        try:
+            valor_escala = interpretar_valor_escala(argumento_escala)
+        except ValueError as erro:
+            await message.channel.send(f'{usuario.mention} {erro}')
+            return
+
+        escalas_usuario[usuario.id] = valor_escala
+        await message.channel.send(
+            f'{usuario.mention} escala registrada em `{formatar_numero_resultado(valor_escala)}`.'
+        )
+        return
+
+    if comando_duelo:
+        if message.guild is None:
+            await message.channel.send('O comando `!duelo` só pode ser usado dentro de um servidor.')
+            return
+
+        ids_alvo = extrair_ids_alvos_texto(message, comando_duelo.group(1) or '')
+        if len(ids_alvo) < 2:
+            await message.channel.send(
+                f'{usuario.mention} use `!duelo @jogador1 @jogador2 ...` ou IDs. Mínimo: 2 participantes. {descrever_duelo_ativo(message.guild.id)}'
+            )
+            return
+
+        duelos_ativos[message.guild.id] = ids_alvo
+        await message.channel.send(f'Duelo registrado. {descrever_duelo_ativo(message.guild.id)}')
+        return
 
     # !tema: salva tema personalizado por usuário.
     if comando_tema:
@@ -1417,7 +1687,14 @@ async def on_message(message):
 
     if comando_rolagem:
         expressao_rolagem = (comando_rolagem.group(1) or '').strip()
-        mensagens, metadados = processar_entrada_rolagem(expressao_rolagem, usuario.id, usuario.mention, prefixo='r ', permitir_expressao_com_dados=True)
+        mensagens, metadados = processar_entrada_rolagem(
+            expressao_rolagem,
+            usuario.id,
+            usuario.mention,
+            prefixo='r ',
+            permitir_expressao_com_dados=True,
+            guild_id=message.guild.id if message.guild else None,
+        )
         if not mensagens:
             await message.channel.send(f'{usuario.mention} expressão inválida. Use: `r d20+5`, `r 4df atacar` ou `r 1d20+4df+3d6`.')
             return
@@ -1425,18 +1702,25 @@ async def on_message(message):
         for mensagem in mensagens:
             await message.channel.send(mensagem)
 
-        if metadados and metadados['teve_mais_quatro'] and metadados['acao_fate'] in ('Atacar', 'Defender', 'Criar Vantagem', 'Superar'):
+        if metadados and deve_ativar_efeito_mais_quatro(metadados['teve_mais_quatro'], metadados['acao_fate']):
             await tocar_audio_ao_mais_quatro(usuario, message.channel, metadados['acao_fate'])
         return
     elif comando_rolagem_sem_prefixo:
-        mensagens, metadados = processar_entrada_rolagem(conteudo_sem_prefixo, usuario.id, usuario.mention, prefixo='', permitir_expressao_com_dados=False)
+        mensagens, metadados = processar_entrada_rolagem(
+            conteudo_sem_prefixo,
+            usuario.id,
+            usuario.mention,
+            prefixo='',
+            permitir_expressao_com_dados=False,
+            guild_id=message.guild.id if message.guild else None,
+        )
         if not mensagens:
             return
 
         for mensagem in mensagens:
             await message.channel.send(mensagem)
 
-        if metadados and metadados['teve_mais_quatro'] and metadados['acao_fate'] in ('Atacar', 'Defender', 'Criar Vantagem', 'Superar'):
+        if metadados and deve_ativar_efeito_mais_quatro(metadados['teve_mais_quatro'], metadados['acao_fate']):
             await tocar_audio_ao_mais_quatro(usuario, message.channel, metadados['acao_fate'])
         return
     # Gatilho por texto/menção de "jandei", redirecionando para canal específico.
