@@ -21,7 +21,7 @@ import yt_dlp
 # VISÃO GERAL DO BOT (handoff para outro dev)
 #
 # 1) Entradas suportadas:
-#    - Comandos de texto: !luta, !tocar, !skipar, !parar, !tema, !invencivel, !escala, !duelo, !fimduelo, !noact, !act, !ban, !desbanir, !adm, !teste, !max, !min
+#    - Comandos de texto: !luta, !tocar, !skipar, !parar, !tema, !invencivel, !escala, !duelo, !fimduelo, !ban, !desbanir, !adm, !teste, !max, !min
 #    - Comandos slash: /roll, /tema, /ban, /desbanir
 #    - Mensagens de rolagem: dN e df (ex.: d20+3, 4df atacar)
 #
@@ -1358,8 +1358,6 @@ async def on_message(message):
     comando_max = re.match(r'^!max(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_min = re.match(r'^!min(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_adm = re.match(r'^!adm(?:\s+(.*))?$', message.content, re.IGNORECASE)
-    comando_noact = re.match(r'^!noact\s*$', message.content, re.IGNORECASE)
-    comando_act = re.match(r'^!act\s*$', message.content, re.IGNORECASE)
     comando_invencivel = re.match(r'^!invencivel\s*$', message.content, re.IGNORECASE)
     comando_escala = re.match(r'^!escala(?:\s+(.*))?$', message.content, re.IGNORECASE)
     comando_duelo = re.match(r'^!duelo(?:\s+(.*))?$', message.content, re.IGNORECASE)
@@ -1369,15 +1367,6 @@ async def on_message(message):
     comando_skipar = re.match(r'^!skipar\s*$', message.content, re.IGNORECASE)
     comando_parar = re.match(r'^!parar\s*$', message.content, re.IGNORECASE)
     comando_tema = re.match(r'^!tema(?:\s+(.*))?$', message.content, re.IGNORECASE)
-
-    # !noact / !act: mantidos por compatibilidade, mas `4df` agora já aceita ação opcional por padrão.
-    if comando_noact:
-        await message.channel.send(f'{usuario.mention} `4df` já funciona sem ação por padrão. Se quiser, ainda pode detalhar a ação normalmente.')
-        return
-
-    if comando_act:
-        await message.channel.send(f'{usuario.mention} a ação em `4df` não é mais obrigatória no bot. Se quiser informar, o bot continua aceitando.')
-        return
 
     if comando_invencivel:
         if ativar_tema_invencivel():
