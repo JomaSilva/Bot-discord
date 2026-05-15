@@ -1002,14 +1002,14 @@ async def tocar_audio_url_no_voz(usuario, canal_texto, audio_url):
 
 
 async def tocar_audio_ao_mais_quatro(usuario, canal_texto, acao_fate):
-    # No ++++, toca o efeito configurado para o tema ativo.
-    if tema_mais_quatro_atual == 'invencivel':
-        await tocar_invencivel_no_voz(usuario, canal_texto)
-        return
-
+    # No ++++, prioriza o tema pessoal do usuário; sem tema, usa o efeito do modo ativo.
     tema_link = temas_usuario.get(usuario.id)
     if tema_link:
         await tocar_audio_url_no_voz(usuario, canal_texto, tema_link)
+        return
+
+    if tema_mais_quatro_atual == 'invencivel':
+        await tocar_invencivel_no_voz(usuario, canal_texto)
         return
 
     if acao_fate == 'Atacar':
